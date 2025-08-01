@@ -20,4 +20,4 @@ cd "$(dirname "$0")"
 
 # Run the GUI
 echo "Starting Stepper Motor Control GUI..."
-python3 stepper_control.py
+python3 gui/stepper_control.py

@@ -1,77 +1,136 @@
-# Stepper Motor GUI Control
+# Magnet Loop Antenna Controller GUI
 
-This GUI provides a simple interface to control your Arduino stepper motor from your Linux computer.
+Eine grafische Benutzeroberfläche zur Steuerung des Steppmotors einer Magnet Loop Antenne für das 11m Band mit 80 Kanälen.
 
 ## Features
 
-- Serial port selection and connection management
-- Simple "Start Motor" button
-- Real-time connection status
-- Expandable for additional motor controls
+### Stepper Motor Kontrolle
+- **Vordefinierte Schritte**: Buttons für 1, 10, 100 und 1000 Schritte vorwärts/rückwärts
+- **Individuelle Schritte**: Eingabefeld für beliebige Schrittanzahl
+- **Geschwindigkeitskontrolle**: RPM-Einstellung (1-20 RPM)
+- **Sofortiger Stopp**: Notfall-Stopp-Button
+- **Positionsabfrage**: Aktuelle Position des Motors anzeigen
 
-## Requirements
+### Verbindung
+- **Port-Auswahl**: Automatische Erkennung verfügbarer serieller Ports
+- **Port-Aktualisierung**: Refresh-Button für neue Ports
+- **Verbindungsstatus**: Visueller Indikator für Verbindungsstatus
 
-- Python 3
-- pyserial library (`pip3 install pyserial`)
-- Arduino connected via USB
+### Logging
+- **Echtzeitprotokoll**: Alle Befehle und Antworten werden protokolliert
+- **Zeitstempel**: Jeder Eintrag mit Zeitstempel
+- **Log löschen**: Button zum Löschen des Protokolls
 
-## Setup
+## Installation
 
-1. **Upload the Arduino Code:**
-   - Use PlatformIO to upload the modified `main.cpp` to your Arduino
-   - The Arduino will now listen for serial commands
+### 1. Arduino-Code hochladen
+Zuerst muss der Arduino-Code auf Ihren Arduino Uno R4 WiFi hochgeladen werden:
 
-2. **Install Python Dependencies:**
-   ```bash
-   pip3 install --user pyserial
-   ```
+```bash
+# Im Projektverzeichnis
+pio run --target upload
+```
 
-3. **Run the GUI:**
-   ```bash
-   ./run_gui.sh
-   ```
-   
-   Or directly:
-   ```bash
-   python3 stepper_control.py
-   ```
+### 2. GUI-Setup
+```bash
+cd gui
+./setup.sh
+```
 
-## Usage
+Oder manuell:
+```bash
+pip3 install -r requirements.txt
+```
 
-1. **Connect Arduino:**
-   - Plug in your Arduino via USB
-   - Select the correct serial port from the dropdown (usually `/dev/ttyUSB0` or `/dev/ttyACM0`)
-   - Click "Connect"
+## Verwendung
 
-2. **Control Motor:**
-   - Once connected, the "Start Motor" button becomes available
-   - Click it to start the motor movement
-   - The motor will run continuously as programmed
+### GUI starten
+```bash
+cd gui
+python3 magnet_loop_controller.py
+```
 
-## Available Serial Commands
+### Verbindung herstellen
+1. Arduino Uno R4 WiFi per USB verbinden
+2. GUI starten
+3. Korrekten Port auswählen (normalerweise `/dev/ttyACM0` oder ähnlich)
+4. "Verbinden" klicken
+5. Warten bis Status "Verbunden" anzeigt
 
-The Arduino now accepts these commands via serial:
+### Motor steuern
 
-- `START` - Start motor movement
-- `STOP` - Stop motor movement  
-- `SPEED:<value>` - Set motor speed (1-1000)
-- `MOVE:<steps>` - Move specific number of steps
+#### Vordefinierte Schritte
+- **Vorwärts**: Buttons 1, 10, 100, 1000 für entsprechende Schrittanzahl
+- **Rückwärts**: Buttons 1, 10, 100, 1000 für entsprechende Schrittanzahl rückwärts
 
-## Expanding the GUI
+#### Individuelle Schritte
+1. Gewünschte Schrittanzahl eingeben
+2. "Vorwärts" oder "Rückwärts" Button klicken
 
-You can easily add more buttons and controls by:
+#### Weitere Funktionen
+- **STOPP**: Sofortiger Halt der Bewegung
+- **Position abfragen**: Zeigt aktuelle Position im Log
+- **RPM setzen**: Geschwindigkeit zwischen 1-20 RPM einstellen
 
-1. Adding new UI elements in the `setup_ui()` method
-2. Creating corresponding command functions
-3. Adding new serial commands in the Arduino code
+## Arduino Befehle
 
-## Troubleshooting
+Die GUI sendet folgende Befehle an den Arduino:
 
-- **Permission denied on serial port:** Add your user to the dialout group:
-  ```bash
-  sudo usermod -a -G dialout $USER
-  ```
-  Then log out and back in.
+- `F<zahl>` - Vorwärts bewegen (z.B. `F100` für 100 Schritte)
+- `B<zahl>` - Rückwärts bewegen (z.B. `B50` für 50 Schritte)
+- `S` - Bewegung stoppen
+- `P` - Position abfragen
+- `RPM<zahl>` - RPM setzen (z.B. `RPM15`)
 
-- **Port not found:** Make sure the Arduino is connected and drivers are installed
-- **Connection fails:** Try a different baud rate or check cable connections
+## Hardware-Anschlüsse
+
+### Arduino Uno R4 WiFi zu ULN2003 Treiber
+- Pin 8 → IN1
+- Pin 9 → IN2
+- Pin 10 → IN3
+- Pin 11 → IN4
+- GND → GND
+- 5V → VCC
+
+### ULN2003 zu 28BYJ-48 Stepper Motor
+- Verbindung über das mitgelieferte Kabel
+
+## Technische Details
+
+### Stepper Motor
+- **Typ**: 28BYJ-48 (5V)
+- **Schritte pro Umdrehung**: 4096 (mit Getriebe)
+- **Standard-RPM**: 12 (einstellbar 1-20)
+
+### Serielle Kommunikation
+- **Baudrate**: 9600
+- **Format**: ASCII-Befehle mit Zeilenende (`\n`)
+
+## Fehlerbehebung
+
+### Verbindungsprobleme
+- Überprüfen Sie, ob der Arduino korrekt angeschlossen ist
+- Stellen Sie sicher, dass der richtige Port ausgewählt ist
+- Prüfen Sie, ob andere Programme den Port verwenden
+- Aktualisieren Sie die Port-Liste
+
+### Motor bewegt sich nicht
+- Überprüfen Sie die Verkabelung zwischen Arduino und ULN2003
+- Prüfen Sie die Stromversorgung (5V)
+- Stellen Sie sicher, dass der Arduino-Code korrekt hochgeladen wurde
+
+### GUI-Probleme
+- Stellen Sie sicher, dass alle Python-Abhängigkeiten installiert sind
+- Prüfen Sie, ob Python3 und tkinter installiert sind
+
+## Anpassungen für Ihre Antenne
+
+Da die Schritte zwischen den Kanälen nicht linear sind, können Sie:
+
+1. **Kalibrierung durchführen**: Nutzen Sie die individuellen Schritte zur Feinabstimmung
+2. **Positionen speichern**: Notieren Sie sich die optimalen Positionen für jeden Kanal
+3. **RPM anpassen**: Je nach Mechanik Ihrer Antenne die Geschwindigkeit optimieren
+
+## Lizenz
+
+Siehe LICENSE-Datei im Hauptverzeichnis.

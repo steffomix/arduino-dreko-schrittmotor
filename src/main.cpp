@@ -69,8 +69,8 @@ void setup() {
   Serial.println(stepper.getRpm());
   Serial.print("Steps per revolution: ");
   Serial.println(4096); // Standard for 28BYJ-48 stepper
-  Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status)");
-  Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps)");
+  Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status), CH<channel>");
+  Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps), CH41 (go to channel 41)");
 }
 
 
@@ -105,7 +105,7 @@ void processCommand(String command) {
   stringComplete = false;
   
   // If motor is busy and this is a movement command, queue it
-  if (motorIsBusy && (command.startsWith("F") || command.startsWith("B"))) {
+  if (motorIsBusy && (command.startsWith("F") || command.startsWith("B") || command.startsWith("CH"))) {
     moveQueue.push(command);
     Serial.println("Befehl in Warteschlange eingereiht: " + command);
     return;
@@ -165,6 +165,38 @@ void executeCommand(String command) {
       Serial.println(rpm);
     } else {
       Serial.println("Ungültige Drehzahl(6-24)");
+    }
+  }
+  else if (command.startsWith("CH")) {
+    // Direct channel command - CH<channel_number>
+    int channel = command.substring(2).toInt();
+    if (channel >= 1 && channel <= 80) {
+      // Calculate position for this channel using the mapping
+      int targetPosition = cbChannelToPosition[channel - 1] * cbChannelSteps;
+      int stepsToMove = targetPosition - currentPosition;
+      
+      if (stepsToMove != 0) {
+        if (stepsToMove > 0) {
+          moveForward(abs(stepsToMove));
+          Serial.print("Fahre zu Kanal ");
+          Serial.print(channel);
+          Serial.print(" - ");
+          Serial.print(abs(stepsToMove));
+          Serial.println(" Schritte vorwärts");
+        } else {
+          moveBackward(abs(stepsToMove));
+          Serial.print("Fahre zu Kanal ");
+          Serial.print(channel);
+          Serial.print(" - ");
+          Serial.print(abs(stepsToMove));
+          Serial.println(" Schritte rückwärts");
+        }
+      } else {
+        Serial.print("Bereits auf Kanal ");
+        Serial.println(channel);
+      }
+    } else {
+      Serial.println("Ungültiger Kanal (1-80)");
     }
   }
   else {

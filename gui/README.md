@@ -1,86 +1,159 @@
 # Magnet Loop Antenna Controller GUI
 
-Eine grafische Benutzeroberfläche zur Steuerung des Steppmotors einer Magnet Loop Antenne für das 11m Band mit 80 Kanälen.
+Enhanced GUI for controlling stepper motor of a 11m band magnet loop antenna with variable capacitor for 80 CB channels.
 
-## Features
+## New Features (Enhanced Version)
 
-### Stepper Motor Kontrolle
-- **Vordefinierte Schritte**: Buttons für 1, 10, 100 und 1000 Schritte vorwärts/rückwärts
-- **Individuelle Schritte**: Eingabefeld für beliebige Schrittanzahl
-- **Geschwindigkeitskontrolle**: RPM-Einstellung (1-20 RPM)
-- **Sofortiger Stopp**: Notfall-Stopp-Button
-- **Positionsabfrage**: Aktuelle Position des Motors anzeigen
+### Channel Navigation
+- **Direct Channel Control**: Navigate directly to any CB channel (1-80)
+- **Channel Up/Down**: Move by 1 or 10 channels with dedicated buttons
+- **Current Channel Display**: Shows the current channel position prominently
+- **Channel History**: Channels follow the CB band layout (41-80, then 1-40)
 
-### Verbindung
-- **Port-Auswahl**: Automatische Erkennung verfügbarer serieller Ports
-- **Port-Aktualisierung**: Refresh-Button für neue Ports
-- **Verbindungsstatus**: Visueller Indikator für Verbindungsstatus
+### Calibration & Configuration
+- **Position Calibration**: Set reference positions for channels 41 (lowest frequency) and 40 (highest frequency)
+- **Steps per Channel**: Configure the motor steps between adjacent channels
+- **Persistent Settings**: All settings are automatically saved to `antenna_config.json`
+- **Position Synchronization**: Sync GUI position with actual Arduino position
 
-### Logging
-- **Echtzeitprotokoll**: Alle Befehle und Antworten werden protokolliert
-- **Zeitstempel**: Jeder Eintrag mit Zeitstempel
-- **Log löschen**: Button zum Löschen des Protokolls
+### Enhanced Safety Features
+- **Motor Status Tracking**: Real-time monitoring of motor movement
+- **Position Sync Warning**: Alerts when position might be out of sync
+- **Safe Shutdown**: Warns user when closing GUI while motor is moving
+- **Movement Queue**: Commands are queued when motor is busy
 
-## Installation
-
-### 1. Arduino-Code hochladen
-Zuerst muss der Arduino-Code auf Ihren Arduino Uno R4 WiFi hochgeladen werden:
-
-```bash
-# Im Projektverzeichnis
-pio run --target upload
+### Configuration File Structure
+The configuration is stored in `antenna_config.json`:
+```json
+{
+  "channel_41_position": 0,      // Motor position for channel 41 (lowest freq)
+  "channel_40_position": 2370,   // Motor position for channel 40 (highest freq)
+  "steps_per_channel": 30,       // Steps between adjacent channels
+  "current_channel": 41,         // Last known channel position
+  "current_position": 0,         // Last known motor position
+  "last_port": "/dev/ttyUSB0",   // Last used serial port
+  "last_rpm": 12                 // Last used RPM setting
+}
 ```
 
-### 2. GUI-Setup
+## Installation & Setup
+
+### Requirements
 ```bash
-cd gui
-./setup.sh
+pip install pyserial tkinter
 ```
 
-Oder manuell:
-```bash
-pip3 install -r requirements.txt
-```
+### First Time Calibration
+1. **Connect to Arduino** using the connection panel
+2. **Manual Positioning**: Use the manual stepper controls to position the capacitor
+3. **Set Channel 41**: Move to the lowest frequency position and click "Aktuelle Position als Kanal 41 setzen"
+4. **Set Channel 40**: Move to the highest frequency position and click "Aktuelle Position als Kanal 40 setzen"
+5. **Calculate Steps**: The steps per channel will be calculated automatically, or enter manually
+6. **Save Calibration**: Click "Kalibrierung speichern" to store the settings
 
-## Verwendung
+### Normal Operation
+1. **Connect** to the Arduino
+2. **Sync Position**: Click "Position synchronisieren" to sync with Arduino
+3. **Navigate Channels**: Use the channel navigation buttons or direct channel entry
+4. **Monitor Status**: Watch the position sync status and motor activity
 
-### GUI starten
+## Arduino Commands
+
+### Basic Movement
+- `F<steps>` - Move forward (clockwise) by steps
+- `B<steps>` - Move backward (counter-clockwise) by steps
+- `S` - Stop current movement
+- `P` - Get current position
+- `RPM<value>` - Set RPM (6-24)
+- `Q` - Get queue status
+
+### Channel Commands (New)
+- `CH<channel>` - Go directly to specified channel (1-80)
+  - Example: `CH41` moves to channel 41
+  - Example: `CH1` moves to channel 1
+
+## GUI Layout
+
+### Connection Panel
+- Serial port selection and connection status
+- Port refresh and connect/disconnect buttons
+
+### Channel Control Panel
+- Current channel display with sync status
+- Channel navigation buttons (-10, -1, +1, +10)
+- Direct channel entry and "Go" button
+
+### Calibration Panel
+- Position settings for channels 41 and 40
+- Steps per channel configuration
+- Calibration save and position sync buttons
+
+### Manual Stepper Control Panel
+- Preset step buttons (1, 10, 100, 1000 steps)
+- Custom step entry with forward/backward buttons
+- Stop button and position query
+- RPM control
+
+### Status & Log Panel
+- Real-time logging of all activities
+- Arduino communication display
+- Clear log functionality
+
+## Safety Features
+
+### Position Synchronization
+- The GUI tracks motor position and current channel
+- When position might be out of sync, warnings are displayed
+- Use "Position synchronisieren" to resync with Arduino
+
+### Safe Application Closure
+- If motor is moving when closing the GUI, a warning is displayed
+- User can choose to wait or close anyway
+- Position accuracy is preserved when possible
+
+### Movement Safety
+- Channel navigation is disabled when motor is busy
+- Commands are queued when motor is moving
+- Real-time status updates prevent conflicting commands
+
+## Troubleshooting
+
+### Position Out of Sync
+If the position becomes out of sync:
+1. Use manual controls to verify actual position
+2. Query position with "Position abfragen"
+3. Use "Position synchronisieren" to resync
+4. Re-calibrate if necessary
+
+### Motor Not Responding
+1. Check serial connection
+2. Verify correct port selection
+3. Check Arduino power and connections
+4. Use "STOPP" button to clear any stuck commands
+
+### Channel Navigation Issues
+1. Ensure calibration is properly set
+2. Verify channel 41 and 40 positions are correct
+3. Check steps per channel calculation
+4. Re-run calibration procedure if needed
+
+## Files
+- `magnet_loop_controller.py` - Main GUI application
+- `antenna_config.json` - Configuration file (auto-created)
+- `antenna_config.json.example` - Example configuration
+- `test_gui.py` - Test script to launch GUI
+- `requirements.txt` - Python dependencies
+- `setup.sh` - Setup script for Linux
+
+## Running the GUI
 ```bash
-cd gui
 python3 magnet_loop_controller.py
 ```
 
-### Verbindung herstellen
-1. Arduino Uno R4 WiFi per USB verbinden
-2. GUI starten
-3. Korrekten Port auswählen (normalerweise `/dev/ttyACM0` oder ähnlich)
-4. "Verbinden" klicken
-5. Warten bis Status "Verbunden" anzeigt
-
-### Motor steuern
-
-#### Vordefinierte Schritte
-- **Vorwärts**: Buttons 1, 10, 100, 1000 für entsprechende Schrittanzahl
-- **Rückwärts**: Buttons 1, 10, 100, 1000 für entsprechende Schrittanzahl rückwärts
-
-#### Individuelle Schritte
-1. Gewünschte Schrittanzahl eingeben
-2. "Vorwärts" oder "Rückwärts" Button klicken
-
-#### Weitere Funktionen
-- **STOPP**: Sofortiger Halt der Bewegung
-- **Position abfragen**: Zeigt aktuelle Position im Log
-- **RPM setzen**: Geschwindigkeit zwischen 1-20 RPM einstellen
-
-## Arduino Befehle
-
-Die GUI sendet folgende Befehle an den Arduino:
-
-- `F<zahl>` - Vorwärts bewegen (z.B. `F100` für 100 Schritte)
-- `B<zahl>` - Rückwärts bewegen (z.B. `B50` für 50 Schritte)
-- `S` - Bewegung stoppen
-- `P` - Position abfragen
-- `RPM<zahl>` - RPM setzen (z.B. `RPM15`)
+Or use the test script:
+```bash
+python3 test_gui.py
+```
 
 ## Hardware-Anschlüsse
 

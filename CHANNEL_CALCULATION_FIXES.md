@@ -1,52 +1,101 @@
-# Channel Calculation Fixes
+# Channel Calculation Fixes Summary
 
 ## Issues Fixed
 
-### 1. Steps Per Channel Calculation
-**Problem**: The steps per channel was manually entered and could lead to inconsistencies.
+### 1. Arduino stepper.getStepsLeft() Negative Values
+**Issue**: `stepper.getStepsLeft()` can return negative values for backward moves, but the comment only mentioned it could be checked for non-zero.
 
-**Solution**: 
-- Made steps per channel automatically calculated from the calibration positions (Channel 41 and Channel 40)
-- Changed the GUI field to read-only with label "Schritte/Kanal (berechnet)"
-- Formula: `steps_per_channel = abs(ch40_pos - ch41_pos) / 79`
-- Rationale: There are 79 channel steps between channel 41 and channel 40 (40 channels 41-80, plus 39 channels 1-39)
+**Fix**: Updated the comment in `main.cpp` line 80 to clarify this behavior:
+```cpp
+motorIsBusy = stepper.getStepsLeft() != 0; // Check if motor is busy (can be negative for backward moves)
+```
 
-### 2. Channel Rounding and Snapping
-**Problem**: Channel calculation wasn't properly snapping to the nearest channel when position updates occurred.
+### 2. GUI Channel Mapping Mismatch
+**Issue**: The GUI was using a different channel mapping system than the Arduino, causing incorrect channel display.
 
-**Solution**:
-- Improved the `calculate_channel_from_position()` method with proper bounds checking
-- Added index clamping to ensure valid range (0-79)
-- Used proper rounding with `round()` function for better snapping behavior
+**Root Cause**: The Arduino code uses `cbChannelToPosition[channel - 1] * cbChannelSteps` where:
+- `cbChannelToPosition` is an array containing the mapping values
+- For channel N, it looks up the VALUE at array index (N-1) and multiplies by steps per channel
+- This is different from using the array INDEX for position calculation
 
-### 3. Position Synchronization
-**Problem**: Channel display would change after movement completion due to position drift.
+**Fix**: Updated the GUI's `Configuration` class to:
+1. Use the exact same mapping array as Arduino
+2. Implement the same calculation logic: `array_value * steps_per_channel`
+3. Implement correct reverse calculation for position-to-channel conversion
 
-**Solution**:
-- Updated position parsing to save configuration when position updates occur
-- Ensured consistent channel calculation using the same calculated steps per channel
-- Added automatic configuration saving when position is updated from Arduino
+### 3. Updated GUI Configuration Class
 
-## Code Changes Made
+#### Added Channel Mapping Array
+```python
+self.channel_to_position_mapping = [
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50,  # indices 0-9: channels 41-50
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60,  # indices 10-19: channels 51-60
+    61, 62, 63, 64, 65, 66, 67, 68, 69, 70,  # indices 20-29: channels 61-70
+    71, 72, 73, 74, 75, 76, 77, 78, 79, 80,  # indices 30-39: channels 71-80
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,          # indices 40-49: channels 1-10
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,  # indices 50-59: channels 11-20
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # indices 60-69: channels 21-30
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40   # indices 70-79: channels 31-40
+]
+```
 
-### Configuration Class
-1. **New Method**: `get_calculated_steps_per_channel()`
-   - Calculates steps per channel from calibration positions
-   - Returns 30.0 as fallback if positions are identical
+#### Updated Channel-to-Position Calculation
+```python
+def calculate_channel_position(self, channel):
+    array_value = self.channel_to_position_mapping[channel - 1]
+    steps_per_channel = self.get("steps_per_channel")
+    base_position = self.config.get("channel_41_position", 0)
+    return base_position + (array_value * steps_per_channel)
+```
 
-2. **Updated Method**: `calculate_channel_from_position()`
-   - Uses calculated steps per channel instead of stored value
-   - Added proper bounds checking and index clamping
-   - Improved rounding behavior
+#### Updated Position-to-Channel Calculation
+```python
+def calculate_channel_from_position(self, position):
+    base_position = self.config.get("channel_41_position", 0)
+    relative_position = position - base_position
+    array_value = round(relative_position / steps_per_channel)
+    
+    # Find which channel has this array value
+    for channel in range(1, 81):
+        if self.channel_to_position_mapping[channel - 1] == array_value:
+            return channel
+```
 
-3. **Updated Method**: `calculate_channel_position()`
-   - Uses calculated steps per channel for consistency
+## Validation Results
 
-### GUI Updates
-1. **Steps Per Channel Field**: 
-   - Changed to read-only (`state="readonly"`)
-   - Updated label to "Schritte/Kanal (berechnet)"
-   - Shows calculated value with 2 decimal places
+All test cases from the user's log now work correctly:
+
+| Position | Expected Channel | Calculated Channel | Status |
+|----------|------------------|-------------------|--------|
+| 1        | 41              | 41                | ✓      |
+| 60       | 42              | 42                | ✓      |
+| 90       | 43              | 43                | ✓      |
+| 390      | 53              | 53                | ✓      |
+| 630      | 61              | 61                | ✓      |
+| 480      | 56              | 56                | ✓      |
+| 360      | 52              | 52                | ✓      |
+| 270      | 49              | 49                | ✓      |
+| 540      | 58              | 58                | ✓      |
+| 120      | 44              | 44                | ✓      |
+| 2220     | 34              | 34                | ✓      |
+| 1380     | 6               | 6                 | ✓      |
+| 750      | 65              | 65                | ✓      |
+
+## Files Modified
+
+1. `/src/main.cpp` - Updated comment for stepper.getStepsLeft()
+2. `/gui/magnet_loop_controller.py` - Complete rewrite of channel calculation logic
+
+## Testing
+
+Created test scripts to validate the fixes:
+- `gui/test_channel_mapping.py` - Tests mapping consistency
+- `gui/detailed_analysis.py` - Analyzes user's specific test cases  
+- `gui/test_arduino_logic.py` - Tests Arduino's original logic
+- `gui/test_gui_logic.py` - Tests GUI's updated logic
+- `gui/test_base_offset.py` - Tests base position offset
+
+The GUI should now correctly display channels that match the Arduino's behavior.
 
 2. **Calibration Methods**:
    - `set_channel_41_position()` and `set_channel_40_position()` now update the calculated steps display

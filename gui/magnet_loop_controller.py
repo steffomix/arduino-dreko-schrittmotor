@@ -27,7 +27,7 @@ class Configuration:
     def __init__(self, config_file="antenna_config.json"):
         self.config_file = config_file
         self.config = {
-            "channel_41_position": 0,  # Lowest frequency position (channel 41)
+            "channel_41_position": 0,  # Base position offset to match Arduino behavior
             "channel_40_position": 2400,  # Highest frequency position (channel 40)
             "steps_per_channel": 30,  # Steps between adjacent channels
             "current_channel": 41,  # Current channel position
@@ -35,6 +35,21 @@ class Configuration:
             "last_port": "",  # Last used serial port
             "last_rpm": 12  # Last used RPM setting
         }
+        
+        # Arduino channel to position mapping (same as in Arduino code)
+        # This maps channels 1-80 to their respective array indices
+        # Array index corresponds to the position in the mapping
+        self.channel_to_position_mapping = [
+            41, 42, 43, 44, 45, 46, 47, 48, 49, 50,  # indices 0-9: channels 41-50
+            51, 52, 53, 54, 55, 56, 57, 58, 59, 60,  # indices 10-19: channels 51-60
+            61, 62, 63, 64, 65, 66, 67, 68, 69, 70,  # indices 20-29: channels 61-70
+            71, 72, 73, 74, 75, 76, 77, 78, 79, 80,  # indices 30-39: channels 71-80
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10,          # indices 40-49: channels 1-10
+            11, 12, 13, 14, 15, 16, 17, 18, 19, 20,  # indices 50-59: channels 11-20
+            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # indices 60-69: channels 21-30
+            31, 32, 33, 34, 35, 36, 37, 38, 39, 40   # indices 70-79: channels 31-40
+        ]
+        
         self.load_config()
     
     def load_config(self):
@@ -64,64 +79,56 @@ class Configuration:
         self.config[key] = value
     
     def calculate_channel_position(self, channel):
-        """Calculate motor position for a given channel"""
+        """Calculate motor position for a given channel using Arduino's original logic"""
         if channel < 1 or channel > 80:
             return None
         
-        # Use calculated steps per channel
-        steps_per_channel = self.get_calculated_steps_per_channel()
+        # Arduino logic: cbChannelToPosition[channel - 1] * cbChannelSteps
+        # This uses the VALUE at array index (channel-1), not the index itself
+        array_value = self.channel_to_position_mapping[channel - 1]
+        steps_per_channel = self.get("steps_per_channel")
         
-        # Channel mapping: 41-80, then 1-40 (as per original array)
-        if 41 <= channel <= 80:
-            # Channels 41-80 are at the beginning
-            index = channel - 41
-        else:
-            # Channels 1-40 are at the end
-            index = 40 + (channel - 1)
-        
-        # Calculate position based on index and steps per channel
-        return self.config["channel_41_position"] + (index * steps_per_channel)
+        # Add base position offset (where the motor coordinate system starts)
+        base_position = self.config.get("channel_41_position", 0)
+        return base_position + (array_value * steps_per_channel)
     
     def calculate_channel_from_position(self, position):
-        """Calculate channel number from motor position with proper snapping"""
-        # Calculate steps per channel from calibration positions
-        steps_per_channel = self.get_calculated_steps_per_channel()
+        """Calculate channel number from motor position using Arduino's original logic"""
+        steps_per_channel = self.get("steps_per_channel")
         if steps_per_channel <= 0:
             return None
-            
-        # Calculate index from position with proper rounding
-        relative_pos = position - self.config["channel_41_position"]
-        # Add half step tolerance for proper snapping to nearest channel
-        index = round(relative_pos / steps_per_channel)
         
-        # Ensure index is within valid range (0-79 for 80 channels)
-        if index < 0:
-            index = 0
-        elif index > 79:
-            index = 79
+        # Remove base position offset
+        base_position = self.config.get("channel_41_position", 0)
+        relative_position = position - base_position
         
-        # Convert index back to channel
-        if 0 <= index <= 39:
-            # Channels 41-80
-            return 41 + index
-        elif 40 <= index <= 79:
-            # Channels 1-40
-            return 1 + (index - 40)
-        else:
-            return None
+        # Reverse the Arduino calculation: relative_position = array_value * steps_per_channel
+        # So array_value = relative_position / steps_per_channel
+        array_value = round(relative_position / steps_per_channel)
+        
+        # Find which channel has this array value
+        # Look for array_value in the mapping array and return the corresponding channel
+        for channel in range(1, 81):  # channels 1-80
+            if self.channel_to_position_mapping[channel - 1] == array_value:
+                return channel
+        
+        # If exact match not found, find the closest
+        closest_channel = 1
+        min_diff = abs(self.channel_to_position_mapping[0] - array_value)
+        
+        for channel in range(1, 81):
+            diff = abs(self.channel_to_position_mapping[channel - 1] - array_value)
+            if diff < min_diff:
+                min_diff = diff
+                closest_channel = channel
+        
+        return closest_channel
     
     def get_calculated_steps_per_channel(self):
-        """Calculate steps per channel from calibration positions"""
-        ch41_pos = self.config.get("channel_41_position", 0)
-        ch40_pos = self.config.get("channel_40_position", 2400)
-        
-        # There are 79 steps between channel 41 and channel 40
-        # (channels 41-80 = 40 channels, then channels 1-40 = 40 channels, minus 1 = 79)
-        if ch40_pos != ch41_pos:
-            return abs(ch40_pos - ch41_pos) / 79
-        else:
-            # Fallback to default if positions are the same
-            return 30.0
+        """Get steps per channel - using fixed value from Arduino code"""
+        # The Arduino uses a fixed 30 steps per channel (cbChannelSteps = 30)
+        # We can still allow configuration override, but default to Arduino value
+        return self.get("steps_per_channel")
 
 class MagnetLoopController:
     def __init__(self, root):

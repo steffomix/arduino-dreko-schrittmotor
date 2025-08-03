@@ -2,8 +2,8 @@
   "channel_41_position": 1,
   "channel_40_position": 3161,
   "steps_per_channel": 40,
-  "current_channel": 46,
-  "current_position": 210,
-  "last_port": "/dev/ttyACM1",
+  "current_channel": 40,
+  "current_position": 4075,
+  "last_port": "/dev/ttyACM2",
   "last_rpm": 12
 }

@@ -68,6 +68,9 @@ class Configuration:
         if channel < 1 or channel > 80:
             return None
         
+        # Use calculated steps per channel
+        steps_per_channel = self.get_calculated_steps_per_channel()
+        
         # Channel mapping: 41-80, then 1-40 (as per original array)
         if 41 <= channel <= 80:
             # Channels 41-80 are at the beginning
@@ -77,13 +80,25 @@ class Configuration:
             index = 40 + (channel - 1)
         
         # Calculate position based on index and steps per channel
-        return self.config["channel_41_position"] + (index * self.config["steps_per_channel"])
+        return self.config["channel_41_position"] + (index * steps_per_channel)
     
     def calculate_channel_from_position(self, position):
-        """Calculate channel number from motor position"""
-        # Calculate index from position
+        """Calculate channel number from motor position with proper snapping"""
+        # Calculate steps per channel from calibration positions
+        steps_per_channel = self.get_calculated_steps_per_channel()
+        if steps_per_channel <= 0:
+            return None
+            
+        # Calculate index from position with proper rounding
         relative_pos = position - self.config["channel_41_position"]
-        index = round(relative_pos / self.config["steps_per_channel"])
+        # Add half step tolerance for proper snapping to nearest channel
+        index = round(relative_pos / steps_per_channel)
+        
+        # Ensure index is within valid range (0-79 for 80 channels)
+        if index < 0:
+            index = 0
+        elif index > 79:
+            index = 79
         
         # Convert index back to channel
         if 0 <= index <= 39:
@@ -94,6 +109,19 @@ class Configuration:
             return 1 + (index - 40)
         else:
             return None
+    
+    def get_calculated_steps_per_channel(self):
+        """Calculate steps per channel from calibration positions"""
+        ch41_pos = self.config.get("channel_41_position", 0)
+        ch40_pos = self.config.get("channel_40_position", 2400)
+        
+        # There are 79 steps between channel 41 and channel 40
+        # (channels 41-80 = 40 channels, then channels 1-40 = 40 channels, minus 1 = 79)
+        if ch40_pos != ch41_pos:
+            return abs(ch40_pos - ch41_pos) / 79
+        else:
+            # Fallback to default if positions are the same
+            return 30.0
 
 class MagnetLoopController:
     def __init__(self, root):
@@ -239,9 +267,9 @@ class MagnetLoopController:
         ch40_entry = ttk.Entry(pos_frame, textvariable=self.ch40_pos_var, width=8)
         ch40_entry.grid(row=0, column=3, padx=(0, 10))
         
-        ttk.Label(pos_frame, text="Schritte/Kanal:").grid(row=0, column=4, padx=(0, 5))
+        ttk.Label(pos_frame, text="Schritte/Kanal (berechnet):").grid(row=0, column=4, padx=(0, 5))
         self.steps_per_channel_var = tk.StringVar()
-        steps_entry = ttk.Entry(pos_frame, textvariable=self.steps_per_channel_var, width=8)
+        steps_entry = ttk.Entry(pos_frame, textvariable=self.steps_per_channel_var, width=8, state="readonly")
         steps_entry.grid(row=0, column=5, padx=(0, 10))
         
         # Calibration buttons
@@ -332,7 +360,10 @@ class MagnetLoopController:
         # Load calibration values into existing StringVars
         self.ch41_pos_var.set(str(self.config.get("channel_41_position", 0)))
         self.ch40_pos_var.set(str(self.config.get("channel_40_position", 2400)))
-        self.steps_per_channel_var.set(str(self.config.get("steps_per_channel", 30)))
+        
+        # Calculate and display steps per channel (read-only)
+        calculated_steps = self.config.get_calculated_steps_per_channel()
+        self.steps_per_channel_var.set(f"{calculated_steps:.2f}")
         
         # Update current channel display
         self.update_channel_display()
@@ -453,6 +484,11 @@ class MagnetLoopController:
         current_pos = self.config.get("current_position", 0)
         self.config.set("channel_41_position", current_pos)
         self.ch41_pos_var.set(str(current_pos))
+        
+        # Update calculated steps per channel
+        calculated_steps = self.config.get_calculated_steps_per_channel()
+        self.steps_per_channel_var.set(f"{calculated_steps:.2f}")
+        
         self.log(f"Kanal 41 Position auf {current_pos} gesetzt")
     
     def set_channel_40_position(self):
@@ -468,6 +504,11 @@ class MagnetLoopController:
         current_pos = self.config.get("current_position", 0)
         self.config.set("channel_40_position", current_pos)
         self.ch40_pos_var.set(str(current_pos))
+        
+        # Update calculated steps per channel
+        calculated_steps = self.config.get_calculated_steps_per_channel()
+        self.steps_per_channel_var.set(f"{calculated_steps:.2f}")
+        
         self.log(f"Kanal 40 Position auf {current_pos} gesetzt")
     
     def save_calibration(self):
@@ -476,29 +517,22 @@ class MagnetLoopController:
             # Validate and save calibration values
             ch41_pos = int(self.ch41_pos_var.get())
             ch40_pos = int(self.ch40_pos_var.get())
-            steps_per_channel = int(self.steps_per_channel_var.get())
             
-            if steps_per_channel <= 0:
-                messagebox.showerror("Fehler", "Schritte pro Kanal muss positiv sein!")
+            # Validate that positions are different
+            if ch40_pos == ch41_pos:
+                messagebox.showerror("Fehler", "Kanal 40 und Kanal 41 Positionen müssen unterschiedlich sein!")
                 return
-            
-            # Calculate steps per channel from positions
-            if ch40_pos != ch41_pos:
-                calculated_steps = abs(ch40_pos - ch41_pos) / 79  # 79 channels between 41 and 40
-                if abs(calculated_steps - steps_per_channel) > 5:  # Allow some tolerance
-                    result = messagebox.askyesno("Warnung", 
-                        f"Die berechneten Schritte pro Kanal ({calculated_steps:.1f}) weichen von der Eingabe ({steps_per_channel}) ab.\n"
-                        "Möchten Sie trotzdem speichern?")
-                    if not result:
-                        return
             
             self.config.set("channel_41_position", ch41_pos)
             self.config.set("channel_40_position", ch40_pos)
-            self.config.set("steps_per_channel", steps_per_channel)
             self.config.save_config()
             
+            # Update the calculated steps per channel display
+            calculated_steps = self.config.get_calculated_steps_per_channel()
+            self.steps_per_channel_var.set(f"{calculated_steps:.2f}")
+            
             messagebox.showinfo("Info", "Kalibrierung gespeichert!")
-            self.log("Kalibrierung gespeichert")
+            self.log(f"Kalibrierung gespeichert: CH41={ch41_pos}, CH40={ch40_pos}, Schritte/Kanal={calculated_steps:.2f}")
             
         except ValueError:
             messagebox.showerror("Fehler", "Ungültige Eingaben für Kalibrierung!")
@@ -604,6 +638,8 @@ class MagnetLoopController:
                     if channel:
                         self.config.set("current_channel", channel)
                         self.update_channel_display()
+                        # Save configuration to keep position and channel synchronized
+                        self.config.save_config()
                     
                     self.log(f"Position aktualisiert: {position} (Kanal {channel})")
             

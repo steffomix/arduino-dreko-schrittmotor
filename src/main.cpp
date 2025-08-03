@@ -77,7 +77,7 @@ void setup() {
 void loop() {
   // Keep stepper moving if there's an active move
   bool previouslyBusy = motorIsBusy;
-  motorIsBusy = stepper.getStepsLeft() > 0; // Check if motor is busy
+  motorIsBusy = stepper.getStepsLeft() != 0; // Check if motor is busy
 
   // Detect when motor finishes moving
   if (previouslyBusy && !motorIsBusy) {

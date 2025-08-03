@@ -32,7 +32,10 @@ class Configuration:
             "current_channel": 41,  # Current channel position
             "current_position": 0,  # Current motor position
             "last_port": "",  # Last used serial port
-            "last_rpm": 12  # Last used RPM setting
+            "last_rpm": 12,  # Last used RPM setting
+            "steps_per_revolution": 4076,  # Steps per motor revolution
+            "max_revolutions": 10,  # Maximum number of revolutions
+            "max_position": 40760  # Maximum position (max_revolutions * steps_per_revolution)
         }
         
         # Arduino channel to position mapping (same as in Arduino code)
@@ -89,7 +92,14 @@ class Configuration:
         
         # Add base position offset (where the motor coordinate system starts)
         base_position = self.config.get("channel_41_position", 0)
-        return base_position + (array_value * steps_per_channel)
+        calculated_position = base_position + (array_value * steps_per_channel)
+        
+        # Check if position is within the maximum allowed range
+        max_position = self.config.get("max_position", 40760)
+        if calculated_position > max_position:
+            return None  # Position would exceed maximum
+            
+        return calculated_position
     
     def calculate_channel_from_position(self, position):
         """Calculate channel number from motor position using Arduino's original logic"""
@@ -136,6 +146,45 @@ class Configuration:
             return actual_diff / (40 - 1)  # Divide by the channel value difference
         else:
             return 30.0  # Default Arduino value
+    
+    def get_max_revolutions(self):
+        """Get maximum number of revolutions"""
+        return self.config.get("max_revolutions", 10)
+    
+    def set_max_revolutions(self, revolutions):
+        """Set maximum number of revolutions and update max position"""
+        if revolutions < 1 or revolutions > 20:
+            return False
+        
+        self.config["max_revolutions"] = revolutions
+        steps_per_rev = self.config.get("steps_per_revolution", 4076)
+        self.config["max_position"] = revolutions * steps_per_rev
+        self.save()
+        return True
+    
+    def get_steps_per_revolution(self):
+        """Get steps per revolution"""
+        return self.config.get("steps_per_revolution", 4076)
+    
+    def set_steps_per_revolution(self, steps):
+        """Set steps per revolution and update max position"""
+        if steps < 1000 or steps > 10000:  # Reasonable range
+            return False
+        
+        self.config["steps_per_revolution"] = steps
+        max_revs = self.config.get("max_revolutions", 10)
+        self.config["max_position"] = max_revs * steps
+        self.save()
+        return True
+    
+    def get_max_position(self):
+        """Get maximum allowed position"""
+        return self.config.get("max_position", 40760)
+    
+    def is_position_valid(self, position):
+        """Check if a position is within valid range"""
+        max_pos = self.get_max_position()
+        return 0 <= position <= max_pos
 
 class MagnetLoopController:
     def __init__(self, root):
@@ -299,9 +348,43 @@ class MagnetLoopController:
         ttk.Button(cal_buttons_frame, text="Position synchronisieren", 
                   command=self.sync_position).grid(row=0, column=3, padx=(0, 5))
         
+        # Multi-Revolution Configuration Frame
+        multirev_frame = ttk.LabelFrame(main_frame, text="Motor Konfiguration (Mehrfach-Umdrehungen)", padding="5")
+        multirev_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        # Multi-revolution settings
+        rev_settings_frame = ttk.Frame(multirev_frame)
+        rev_settings_frame.grid(row=0, column=0, columnspan=3, pady=(0, 5))
+        
+        ttk.Label(rev_settings_frame, text="Schritte/Umdrehung:").grid(row=0, column=0, padx=(0, 5))
+        self.steps_per_rev_var = tk.StringVar()
+        steps_rev_entry = ttk.Entry(rev_settings_frame, textvariable=self.steps_per_rev_var, width=8)
+        steps_rev_entry.grid(row=0, column=1, padx=(0, 10))
+        
+        ttk.Label(rev_settings_frame, text="Max. Umdrehungen:").grid(row=0, column=2, padx=(0, 5))
+        self.max_revolutions_var = tk.StringVar()
+        max_rev_entry = ttk.Entry(rev_settings_frame, textvariable=self.max_revolutions_var, width=8)
+        max_rev_entry.grid(row=0, column=3, padx=(0, 10))
+        
+        ttk.Label(rev_settings_frame, text="Max. Position:").grid(row=0, column=4, padx=(0, 5))
+        self.max_position_var = tk.StringVar()
+        max_pos_entry = ttk.Entry(rev_settings_frame, textvariable=self.max_position_var, width=8, state="readonly")
+        max_pos_entry.grid(row=0, column=5, padx=(0, 10))
+        
+        # Multi-revolution control buttons
+        rev_buttons_frame = ttk.Frame(multirev_frame)
+        rev_buttons_frame.grid(row=1, column=0, columnspan=3, pady=(5, 0))
+        
+        ttk.Button(rev_buttons_frame, text="Konfiguration übernehmen", 
+                  command=self.apply_motor_config).grid(row=0, column=0, padx=(0, 5))
+        ttk.Button(rev_buttons_frame, text="Position zurücksetzen", 
+                  command=self.reset_position).grid(row=0, column=1, padx=(0, 5))
+        ttk.Button(rev_buttons_frame, text="An Arduino senden", 
+                  command=self.send_motor_config_to_arduino).grid(row=0, column=2, padx=(0, 5))
+        
         # Control Frame
         control_frame = ttk.LabelFrame(main_frame, text="Manuelle Stepper Kontrolle", padding="5")
-        control_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        control_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Preset buttons frame
         preset_frame = ttk.Frame(control_frame)
@@ -356,7 +439,7 @@ class MagnetLoopController:
         
         # Status and Log Frame
         log_frame = ttk.LabelFrame(main_frame, text="Status & Log", padding="5")
-        log_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
+        log_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         
@@ -378,6 +461,11 @@ class MagnetLoopController:
         # Calculate and display steps per channel (read-only)
         calculated_steps = self.config.get_calculated_steps_per_channel()
         self.steps_per_channel_var.set(f"{calculated_steps:.2f}")
+        
+        # Load multi-revolution settings
+        self.steps_per_rev_var.set(str(self.config.get_steps_per_revolution()))
+        self.max_revolutions_var.set(str(self.config.get_max_revolutions()))
+        self.max_position_var.set(str(self.config.get_max_position()))
         
         # Update current channel display
         self.update_channel_display()
@@ -438,6 +526,14 @@ class MagnetLoopController:
             messagebox.showerror("Fehler", f"Kanal {new_channel} ist außerhalb des gültigen Bereichs (1-80)!")
             return
         
+        # Check if channel position is within maximum position bounds
+        channel_position = self.config.calculate_channel_position(new_channel)
+        if channel_position is None:
+            messagebox.showerror("Fehler", 
+                               f"Kanal {new_channel} liegt außerhalb des konfigurierten "
+                               f"Maximums von {self.config.get_max_position()} Schritten!")
+            return
+        
         # Send channel command to Arduino (let Arduino handle the calculations)
         self.send_command(f"CH{new_channel}")
         
@@ -458,6 +554,14 @@ class MagnetLoopController:
             
             if target_channel < 1 or target_channel > 80:
                 messagebox.showerror("Fehler", "Kanal muss zwischen 1 und 80 liegen!")
+                return
+            
+            # Check if channel position is within maximum position bounds
+            channel_position = self.config.calculate_channel_position(target_channel)
+            if channel_position is None:
+                messagebox.showerror("Fehler", 
+                                   f"Kanal {target_channel} liegt außerhalb des konfigurierten "
+                                   f"Maximums von {self.config.get_max_position()} Schritten!")
                 return
             
             if not self.is_connected:
@@ -560,6 +664,69 @@ class MagnetLoopController:
         self.send_command("P")
         self.position_synced = True
         self.update_sync_status()
+    
+    def apply_motor_config(self):
+        """Apply motor configuration settings"""
+        try:
+            steps_per_rev = int(self.steps_per_rev_var.get())
+            max_revolutions = int(self.max_revolutions_var.get())
+            
+            # Validate inputs
+            if not (1000 <= steps_per_rev <= 10000):
+                messagebox.showerror("Fehler", "Schritte pro Umdrehung müssen zwischen 1000 und 10000 liegen!")
+                return
+            
+            if not (1 <= max_revolutions <= 20):
+                messagebox.showerror("Fehler", "Maximale Umdrehungen müssen zwischen 1 und 20 liegen!")
+                return
+            
+            # Update configuration
+            if self.config.set_steps_per_revolution(steps_per_rev):
+                if self.config.set_max_revolutions(max_revolutions):
+                    # Update display
+                    self.max_position_var.set(str(self.config.get_max_position()))
+                    
+                    messagebox.showinfo("Info", "Motor Konfiguration übernommen!")
+                    self.log(f"Motor Konfiguration: {steps_per_rev} Schritte/Umdrehung, max {max_revolutions} Umdrehungen")
+                else:
+                    messagebox.showerror("Fehler", "Ungültige Anzahl Umdrehungen!")
+            else:
+                messagebox.showerror("Fehler", "Ungültige Schritte pro Umdrehung!")
+                
+        except ValueError:
+            messagebox.showerror("Fehler", "Ungültige Eingaben für Motor Konfiguration!")
+    
+    def reset_position(self):
+        """Reset position to zero"""
+        if not self.is_connected:
+            messagebox.showwarning("Warnung", "Nicht mit Arduino verbunden!")
+            return
+        
+        # Confirm with user
+        result = messagebox.askyesno("Bestätigung", 
+                                   "Position auf 0 zurücksetzen?\n\n"
+                                   "Dies setzt die aktuelle Position des Motors auf 0 zurück.")
+        
+        if result:
+            self.send_command("RESET")
+            self.config.set("current_position", 0)
+            self.log("Position auf 0 zurückgesetzt")
+    
+    def send_motor_config_to_arduino(self):
+        """Send motor configuration to Arduino"""
+        if not self.is_connected:
+            messagebox.showwarning("Warnung", "Nicht mit Arduino verbunden!")
+            return
+        
+        try:
+            max_revolutions = int(self.max_revolutions_var.get())
+            
+            # Send max revolutions command to Arduino
+            self.send_command(f"MAX{max_revolutions}")
+            self.log(f"Motor Konfiguration an Arduino gesendet: MAX{max_revolutions}")
+            
+        except ValueError:
+            messagebox.showerror("Fehler", "Ungültige Anzahl Umdrehungen!")
         self.log("Position mit Arduino synchronisiert")
     
     def refresh_ports(self):
@@ -749,16 +916,39 @@ class MagnetLoopController:
     
     def move_steps(self, steps, forward=True):
         """Move stepper motor by specified steps"""
+        if not self.is_connected:
+            messagebox.showwarning("Warnung", "Nicht mit Arduino verbunden!")
+            return
+        
+        if self.motor_is_moving:
+            messagebox.showwarning("Warnung", "Motor bewegt sich gerade. Bitte warten!")
+            return
+        
+        # Check position bounds before moving
+        current_pos = self.config.get("current_position", 0)
+        max_pos = self.config.get_max_position()
+        
         if forward:
+            new_pos = current_pos + steps
+            if new_pos > max_pos:
+                messagebox.showerror("Fehler", 
+                                   f"Bewegung würde Maximum überschreiten!\n"
+                                   f"Aktuelle Position: {current_pos}\n"
+                                   f"Neue Position wäre: {new_pos}\n"
+                                   f"Maximum: {max_pos}")
+                return
             command = f"F{steps}"
-            # Update estimated position
-            current_pos = self.config.get("current_position", 0)
-            self.config.set("current_position", current_pos + steps)
+            self.config.set("current_position", new_pos)
         else:
+            new_pos = current_pos - steps
+            if new_pos < 0:
+                messagebox.showerror("Fehler", 
+                                   f"Bewegung würde unter 0 gehen!\n"
+                                   f"Aktuelle Position: {current_pos}\n"
+                                   f"Neue Position wäre: {new_pos}")
+                return
             command = f"B{steps}"
-            # Update estimated position
-            current_pos = self.config.get("current_position", 0)
-            self.config.set("current_position", current_pos - steps)
+            self.config.set("current_position", new_pos)
         
         self.send_command(command)
         self.motor_is_moving = True

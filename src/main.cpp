@@ -36,6 +36,10 @@ bool motorIsBusy = false; // Flag to indicate if motor is currently movin
 std::queue<String> moveQueue; // Queue for move commands
 
 int cbChannelSteps = 30; // Number of steps per channel (adjust as needed)
+int stepsPerRevolution = 4076; // Steps per motor revolution (28BYJ-48 with gear)
+int maxRevolutions = 10; // Maximum number of revolutions allowed
+long maxPosition = 40760; // Maximum position (10 * 4076 steps)
+long minPosition = 0; // Minimum position
 
 // Channel to position mapping for 80 channels
 // This maps channels 1-80 to their respective positions
@@ -68,9 +72,15 @@ void setup() {
   Serial.print("Stepper RPM: ");
   Serial.println(stepper.getRpm());
   Serial.print("Steps per revolution: ");
-  Serial.println(4096); // Standard for 28BYJ-48 stepper
+  Serial.println(stepsPerRevolution);
+  Serial.print("Maximum revolutions: ");
+  Serial.println(maxRevolutions);
+  Serial.print("Maximum position: ");
+  Serial.println(maxPosition);
   Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status), CH<channel>");
+  Serial.println("         MAX<revs> (set max revolutions), RESET (reset position to 0)");
   Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps), CH41 (go to channel 41)");
+  Serial.println("         MAX5 (set max 5 revolutions), RESET (reset position to 0)");
 }
 
 
@@ -129,20 +139,34 @@ void executeCommand(String command) {
     // Forward movement
     int steps = command.substring(1).toInt();
     if (steps > 0) {
-      moveForward(steps);
-      Serial.print("Motor startet - Fahre ");
-      Serial.print(steps);
-      Serial.println(" Schritte vorwärts");
+      // Check if movement would exceed maximum position
+      if (currentPosition + steps <= maxPosition) {
+        moveForward(steps);
+        Serial.print("Motor startet - Fahre ");
+        Serial.print(steps);
+        Serial.println(" Schritte vorwärts");
+      } else {
+        Serial.print("Bewegung abgelehnt - würde Maximum überschreiten (");
+        Serial.print(maxPosition);
+        Serial.println(")");
+      }
     }
   }
   else if (command.startsWith("B")) {
     // Backward movement
     int steps = command.substring(1).toInt();
     if (steps > 0) {
-      moveBackward(steps);
-      Serial.print("Motor startet - Fahre ");
-      Serial.print(steps);
-      Serial.println(" Schritte rückwärts");
+      // Check if movement would go below minimum position
+      if (currentPosition - steps >= minPosition) {
+        moveBackward(steps);
+        Serial.print("Motor startet - Fahre ");
+        Serial.print(steps);
+        Serial.println(" Schritte rückwärts");
+      } else {
+        Serial.print("Bewegung abgelehnt - würde Minimum unterschreiten (");
+        Serial.print(minPosition);
+        Serial.println(")");
+      }
     }
   }
   else if (command == "S") {
@@ -154,7 +178,12 @@ void executeCommand(String command) {
   else if (command == "P") {
     // Get position
     Serial.print("Aktuelle Position: ");
-    Serial.println(currentPosition);
+    Serial.print(currentPosition);
+    Serial.print(" (Umdrehung: ");
+    Serial.print(currentPosition / stepsPerRevolution);
+    Serial.print(", Schritt: ");
+    Serial.print(currentPosition % stepsPerRevolution);
+    Serial.println(")");
   }
   else if (command == "Q") {
     // Get queue status
@@ -163,6 +192,13 @@ void executeCommand(String command) {
     Serial.println(" Befehle wartend");
     Serial.print("Motor Status: ");
     Serial.println(motorIsBusy ? "Beschäftigt" : "Bereit");
+    Serial.print("Position: ");
+    Serial.print(currentPosition);
+    Serial.print(" / ");
+    Serial.print(maxPosition);
+    Serial.print(" (Umdrehungen: ");
+    Serial.print(maxRevolutions);
+    Serial.println(")");
   }
   else if (command.startsWith("RPM")) {
     // Set RPM
@@ -181,31 +217,66 @@ void executeCommand(String command) {
     if (channel >= 1 && channel <= 80) {
       // Calculate position for this channel using the mapping
       int targetPosition = cbChannelToPosition[channel - 1] * cbChannelSteps;
-      int stepsToMove = targetPosition - currentPosition;
       
-      if (stepsToMove != 0) {
-        if (stepsToMove > 0) {
-          moveForward(abs(stepsToMove));
-          Serial.print("Motor startet - Fahre zu Kanal ");
-          Serial.print(channel);
-          Serial.print(" - ");
-          Serial.print(abs(stepsToMove));
-          Serial.println(" Schritte vorwärts");
+      // Check if target position is within bounds
+      if (targetPosition >= minPosition && targetPosition <= maxPosition) {
+        int stepsToMove = targetPosition - currentPosition;
+        
+        if (stepsToMove != 0) {
+          if (stepsToMove > 0) {
+            moveForward(abs(stepsToMove));
+            Serial.print("Motor startet - Fahre zu Kanal ");
+            Serial.print(channel);
+            Serial.print(" - ");
+            Serial.print(abs(stepsToMove));
+            Serial.println(" Schritte vorwärts");
+          } else {
+            moveBackward(abs(stepsToMove));
+            Serial.print("Motor startet - Fahre zu Kanal ");
+            Serial.print(channel);
+            Serial.print(" - ");
+            Serial.print(abs(stepsToMove));
+            Serial.println(" Schritte rückwärts");
+          }
         } else {
-          moveBackward(abs(stepsToMove));
-          Serial.print("Motor startet - Fahre zu Kanal ");
-          Serial.print(channel);
-          Serial.print(" - ");
-          Serial.print(abs(stepsToMove));
-          Serial.println(" Schritte rückwärts");
+          Serial.print("Bereits auf Kanal ");
+          Serial.println(channel);
         }
       } else {
-        Serial.print("Bereits auf Kanal ");
-        Serial.println(channel);
+        Serial.print("Kanal ");
+        Serial.print(channel);
+        Serial.print(" außerhalb des gültigen Bereichs (Position: ");
+        Serial.print(targetPosition);
+        Serial.println(")");
       }
     } else {
       Serial.println("Ungültiger Kanal (1-80)");
     }
+  }
+  else if (command.startsWith("MAX")) {
+    // Set maximum revolutions - MAX<revolutions>
+    int revolutions = command.substring(3).toInt();
+    if (revolutions >= 1 && revolutions <= 20) {
+      maxRevolutions = revolutions;
+      maxPosition = maxRevolutions * stepsPerRevolution;
+      Serial.print("Maximale Umdrehungen gesetzt auf: ");
+      Serial.print(maxRevolutions);
+      Serial.print(" (Maximale Position: ");
+      Serial.print(maxPosition);
+      Serial.println(")");
+      
+      // Check if current position exceeds new maximum
+      if (currentPosition > maxPosition) {
+        Serial.println("WARNUNG: Aktuelle Position überschreitet neues Maximum!");
+      }
+    } else {
+      Serial.println("Ungültige Anzahl Umdrehungen (1-20)");
+    }
+  }
+  else if (command == "RESET") {
+    // Reset position to zero
+    currentPosition = 0;
+    Serial.println("Position auf 0 zurückgesetzt");
   }
   else {
     Serial.print("Unbekannter Befehl: ");

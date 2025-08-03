@@ -1,9 +1,11 @@
 {
   "channel_41_position": 0,
   "channel_40_position": 2370,
-  "steps_per_channel": 30,
   "current_channel": 41,
   "current_position": 0,
   "last_port": "/dev/ttyUSB0",
-  "last_rpm": 12
+  "last_rpm": 12,
+  "steps_per_revolution": 4076,
+  "max_revolutions": 10,
+  "max_position": 40760
 }

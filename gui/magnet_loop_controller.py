@@ -125,13 +125,35 @@ class MagnetLoopController:
     def create_widgets(self):
         """Create all GUI widgets"""
         
-        # Main frame
-        main_frame = ttk.Frame(self.root, padding="10", width=900, height=700)
+        # Main canvas with scrollbar for scrolling functionality
+        self.canvas = tk.Canvas(self.root)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack scrollbar and canvas
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind mousewheel to canvas
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Main frame inside the scrollable area
+        main_frame = ttk.Frame(self.scrollable_frame, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Configure grid weights
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
+        self.scrollable_frame.columnconfigure(0, weight=1)
+        self.scrollable_frame.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         
         # Connection Frame
@@ -150,6 +172,13 @@ class MagnetLoopController:
         
         self.status_label = ttk.Label(connection_frame, text="Nicht verbunden", foreground="red")
         self.status_label.grid(row=0, column=4, padx=(5, 0))
+        
+        # Motor status indicator
+        self.motor_status_var = tk.StringVar()
+        self.motor_status_label = ttk.Label(connection_frame, textvariable=self.motor_status_var, 
+                                          font=("Arial", 10, "bold"), foreground="green")
+        self.motor_status_label.grid(row=0, column=5, padx=(10, 0))
+        self.update_motor_status_display()
         
         # Channel Control Frame
         channel_frame = ttk.LabelFrame(main_frame, text="Kanal Kontrolle (CB Linear)", padding="5")
@@ -337,6 +366,15 @@ class MagnetLoopController:
             self.sync_status_var.set("Position NICHT synchronisiert!")
             self.sync_status_label.config(foreground="red")
     
+    def update_motor_status_display(self):
+        """Update the motor status display"""
+        if self.motor_is_moving:
+            self.motor_status_var.set("🔄 Motor läuft")
+            self.motor_status_label.config(foreground="orange")
+        else:
+            self.motor_status_var.set("⚫ Motor bereit")
+            self.motor_status_label.config(foreground="green")
+    
     def change_channel(self, delta):
         """Change channel by delta amount"""
         if not self.is_connected:
@@ -362,6 +400,10 @@ class MagnetLoopController:
         self.config.set("current_channel", new_channel)
         self.update_channel_display()
         
+        # Set motor as moving
+        self.motor_is_moving = True
+        self.update_motor_status_display()
+        
         self.log(f"Befehl gesendet: Fahre zu Kanal {new_channel}")
     
     def goto_channel(self):
@@ -377,12 +419,20 @@ class MagnetLoopController:
                 messagebox.showwarning("Warnung", "Nicht mit Arduino verbunden!")
                 return
             
+            if self.motor_is_moving:
+                messagebox.showwarning("Warnung", "Motor bewegt sich gerade. Bitte warten!")
+                return
+            
             # Send channel command directly to Arduino
             self.send_command(f"CH{target_channel}")
             
             # Update local tracking
             self.config.set("current_channel", target_channel)
             self.update_channel_display()
+            
+            # Set motor as moving
+            self.motor_is_moving = True
+            self.update_motor_status_display()
             
             self.log(f"Befehl gesendet: Gehe zu Kanal {target_channel}")
                 
@@ -559,9 +609,36 @@ class MagnetLoopController:
             
             elif "Motor angehalten" in response or "STOPP" in response:
                 self.motor_is_moving = False
+                self.update_motor_status_display()
+                self.log("✓ Motor gestoppt")
+                
+            elif "Motor fertig" in response or "Bewegung abgeschlossen" in response:
+                self.motor_is_moving = False
+                self.update_motor_status_display()
+                self.log("✓ Motor fertig - Bewegung abgeschlossen")
+                # Request position update after movement completes
+                self.root.after(500, lambda: self.send_command("P"))
+                
+            elif "Motor startet" in response:
+                self.motor_is_moving = True
+                self.update_motor_status_display()
+                if "Kanal" in response:
+                    # Extract channel number from response
+                    try:
+                        parts = response.split()
+                        for i, part in enumerate(parts):
+                            if part == "Kanal" and i + 1 < len(parts):
+                                channel = int(parts[i + 1])
+                                self.config.set("current_channel", channel)
+                                self.update_channel_display()
+                                break
+                    except (ValueError, IndexError):
+                        pass
+                self.log("⚡ " + response)
                 
             elif "Fahre zu Kanal" in response:
                 self.motor_is_moving = True
+                self.update_motor_status_display()
                 # Extract channel number from response
                 try:
                     parts = response.split()
@@ -573,13 +650,16 @@ class MagnetLoopController:
                             break
                 except (ValueError, IndexError):
                     pass
+                self.log("➡ " + response)
                 
-            elif "Fahre" in response or "Move" in response:
+            elif "Fahre" in response and "Schritte" in response:
                 self.motor_is_moving = True
+                self.update_motor_status_display()
                 # Mark position as potentially out of sync for manual moves
                 if "Schritte" in response and self.position_synced:
                     self.position_synced = False
                     self.update_sync_status()
+                self.log("➡ " + response)
             
             elif "Bereits auf Kanal" in response:
                 # Extract channel number
@@ -588,8 +668,17 @@ class MagnetLoopController:
                     channel = int(parts[-1])
                     self.config.set("current_channel", channel)
                     self.update_channel_display()
+                    self.log("✓ " + response)
                 except (ValueError, IndexError):
-                    pass
+                    self.log("✓ " + response)
+                    
+            elif "Motor Status:" in response:
+                if "Bereit" in response:
+                    self.motor_is_moving = False
+                    self.update_motor_status_display()
+                elif "Beschäftigt" in response:
+                    self.motor_is_moving = True
+                    self.update_motor_status_display()
                     
         except Exception as e:
             self.log(f"Fehler beim Verarbeiten der Arduino-Antwort: {e}")
@@ -623,6 +712,7 @@ class MagnetLoopController:
         
         self.send_command(command)
         self.motor_is_moving = True
+        self.update_motor_status_display()
     
     def move_custom_forward(self):
         """Move forward with custom step count"""
@@ -650,6 +740,7 @@ class MagnetLoopController:
         """Stop stepper movement"""
         self.send_command("S")
         self.motor_is_moving = False
+        self.update_motor_status_display()
     
     def get_position(self):
         """Get current stepper position"""

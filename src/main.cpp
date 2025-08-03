@@ -76,7 +76,15 @@ void setup() {
 
 void loop() {
   // Keep stepper moving if there's an active move
+  bool previouslyBusy = motorIsBusy;
   motorIsBusy = stepper.getStepsLeft() > 0; // Check if motor is busy
+
+  // Detect when motor finishes moving
+  if (previouslyBusy && !motorIsBusy) {
+    Serial.println("Motor fertig - Bewegung abgeschlossen");
+    Serial.print("Aktuelle Position: ");
+    Serial.println(currentPosition);
+  }
 
   stepper.run();
 
@@ -122,7 +130,7 @@ void executeCommand(String command) {
     int steps = command.substring(1).toInt();
     if (steps > 0) {
       moveForward(steps);
-      Serial.print("Fahre  ");
+      Serial.print("Motor startet - Fahre ");
       Serial.print(steps);
       Serial.println(" Schritte vorwärts");
     }
@@ -132,7 +140,7 @@ void executeCommand(String command) {
     int steps = command.substring(1).toInt();
     if (steps > 0) {
       moveBackward(steps);
-      Serial.print("Fahre ");
+      Serial.print("Motor startet - Fahre ");
       Serial.print(steps);
       Serial.println(" Schritte rückwärts");
     }
@@ -178,14 +186,14 @@ void executeCommand(String command) {
       if (stepsToMove != 0) {
         if (stepsToMove > 0) {
           moveForward(abs(stepsToMove));
-          Serial.print("Fahre zu Kanal ");
+          Serial.print("Motor startet - Fahre zu Kanal ");
           Serial.print(channel);
           Serial.print(" - ");
           Serial.print(abs(stepsToMove));
           Serial.println(" Schritte vorwärts");
         } else {
           moveBackward(abs(stepsToMove));
-          Serial.print("Fahre zu Kanal ");
+          Serial.print("Motor startet - Fahre zu Kanal ");
           Serial.print(channel);
           Serial.print(" - ");
           Serial.print(abs(stepsToMove));

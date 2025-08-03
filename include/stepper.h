@@ -8,3 +8,9 @@ void moveBackward(int steps);
 void stopMovement();    
 void updatePosition();
 void serialEvent();
+void clearQueue();
+void processQueue();
+void executeCommand(String command);
+
+
+                                      

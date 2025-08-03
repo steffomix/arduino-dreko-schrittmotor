@@ -1,5 +1,7 @@
 #include <Arduino.h>
+#include <queue>
 
+#include <CheapStepper.h>
 #include <stepper.h>
 
 /*
@@ -22,7 +24,6 @@
  * //////////////////////////////////////
  */
 
-#include <CheapStepper.h>
 
 // Stepper motor setup - pins 8,9,10,11 to IN1,IN2,IN3,IN4 on ULN2003 board
 CheapStepper stepper(8, 9, 10, 11);
@@ -31,9 +32,24 @@ CheapStepper stepper(8, 9, 10, 11);
 long currentPosition = 0;  // Track absolute position
 String inputString = "";   // String to hold incoming serial data
 bool stringComplete = false; // Flag for complete serial command
-bool motorIsBusy = false; // Flag to indicate if motor is currently moving
-bool motorBusyMsgSend = false; // Flag to indicate if busy message has been sent
+bool motorIsBusy = false; // Flag to indicate if motor is currently movin
+std::queue<String> moveQueue; // Queue for move commands
 
+int cbChannelSteps = 30; // Number of steps per channel (adjust as needed)
+
+// Channel to position mapping for 80 channels
+// This maps channels 1-80 to their respective positions
+// base is zero, so channel 1 is position 0, channel 80 is position 79
+std::array<int, 80> cbChannelToPosition = {
+  41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+  51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+  61, 62, 63, 64, 65, 66, 67, 68, 69, 70,
+  71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+  1,2,3,4,5,6,7,8,9,10,
+  11,12,13,14,15,16,17,18,19,20,
+  21,22,23,24,25,26,27,28,29,30,
+  31,32,33,34,35,36,37,38,39, 40
+};
 
 void setup() {
   // Initialize serial communication
@@ -53,7 +69,7 @@ void setup() {
   Serial.println(stepper.getRpm());
   Serial.print("Steps per revolution: ");
   Serial.println(4096); // Standard for 28BYJ-48 stepper
-  Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>");
+  Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status)");
   Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps)");
 }
 
@@ -61,18 +77,20 @@ void setup() {
 void loop() {
   // Keep stepper moving if there's an active move
   motorIsBusy = stepper.getStepsLeft() > 0; // Check if motor is busy
+
   stepper.run();
 
+  // Handle serial input
   serialEvent();
-  if(!motorIsBusy) {
-    motorBusyMsgSend = false; // Reset busy message flag when not moving
-    // Process serial commands
-    if (stringComplete) {
-      processCommand(inputString);
-      inputString = "";
-      stringComplete = false;
-    }
+
+  // Process complete commands
+  if (stringComplete) {
+    processCommand(inputString);
+    stringComplete = false;
   }
+
+  // Process queued commands when motor is idle
+  processQueue();
   
   // Update position tracking
   updatePosition();
@@ -82,15 +100,31 @@ void loop() {
 void processCommand(String command) {
   command.trim(); // Remove whitespace
   command.toUpperCase(); // Convert to uppercase
+
+  inputString = "";
+  stringComplete = false;
   
+  // If motor is busy and this is a movement command, queue it
+  if (motorIsBusy && (command.startsWith("F") || command.startsWith("B"))) {
+    moveQueue.push(command);
+    Serial.println("Befehl in Warteschlange eingereiht: " + command);
+    return;
+  }
+  
+  // Execute command immediately
+  executeCommand(command);
+}
+
+// Function to execute a command
+void executeCommand(String command) {
   if (command.startsWith("F")) {
     // Forward movement
     int steps = command.substring(1).toInt();
     if (steps > 0) {
       moveForward(steps);
-      Serial.print("Moving forward ");
+      Serial.print("Fahre  ");
       Serial.print(steps);
-      Serial.println(" steps");
+      Serial.println(" Schritte vorwärts");
     }
   }
   else if (command.startsWith("B")) {
@@ -98,34 +132,62 @@ void processCommand(String command) {
     int steps = command.substring(1).toInt();
     if (steps > 0) {
       moveBackward(steps);
-      Serial.print("Moving backward ");
+      Serial.print("Fahre ");
       Serial.print(steps);
-      Serial.println(" steps");
+      Serial.println(" Schritte rückwärts");
     }
   }
   else if (command == "S") {
-    // Stop movement
+    // Stop movement - also clear the queue
     stopMovement();
-    Serial.println("Movement stopped");
+    clearQueue();
+    Serial.println("Motor angehalten - Warteschlange geleert");
   }
   else if (command == "P") {
     // Get position
-    Serial.print("Position: ");
+    Serial.print("Aktuelle Position: ");
     Serial.println(currentPosition);
+  }
+  else if (command == "Q") {
+    // Get queue status
+    Serial.print("Warteschlange: ");
+    Serial.print(moveQueue.size());
+    Serial.println(" Befehle wartend");
+    Serial.print("Motor Status: ");
+    Serial.println(motorIsBusy ? "Beschäftigt" : "Bereit");
   }
   else if (command.startsWith("RPM")) {
     // Set RPM
     int rpm = command.substring(3).toInt();
-    if (rpm > 0 && rpm <= 20) {
+    if (rpm > 5 && rpm <= 25) {
       stepper.setRpm(rpm);
-      Serial.print("RPM set to: ");
+      Serial.print("Drehzahl gesetzt auf: ");
       Serial.println(rpm);
     } else {
-      Serial.println("Invalid RPM (1-20)");
+      Serial.println("Ungültige Drehzahl(6-24)");
     }
   }
   else {
-    Serial.println("Unknown command");
+    Serial.print("Unbekannter Befehl: ");
+    Serial.println(command);
+  }
+}
+
+// Function to process queued commands
+void processQueue() {
+  // Only process queue if motor is not busy and there are commands waiting
+  if (!motorIsBusy && !moveQueue.empty()) {
+    String nextCommand = moveQueue.front();
+    moveQueue.pop();
+    Serial.println("Führe Befehl aus Warteschlange aus: " + nextCommand);
+    executeCommand(nextCommand);
+  }
+}
+
+// Function to clear the command queue
+void clearQueue() {
+  while (!moveQueue.empty()) {
+    moveQueue.pop();
   }
 }
 
@@ -157,16 +219,11 @@ void updatePosition() {
 void serialEvent() {
   while (Serial.available()) {
     char inChar = (char)Serial.read();
-    if(inChar != NULL && motorIsBusy && !motorBusyMsgSend) { 
-      // If motor is busy, ignore new commands
-      Serial.println("Motor is busy, ignoring new commands");
-      motorBusyMsgSend = true; // Set flag to indicate busy message has been sent
-      return;
-    }
     if (inChar == '\n') {
       stringComplete = true;
     } else {
       inputString += inChar;
     }
   }
+
 }

@@ -29,7 +29,6 @@ class Configuration:
         self.config = {
             "channel_41_position": 0,  # Base position offset to match Arduino behavior
             "channel_40_position": 2400,  # Highest frequency position (channel 40)
-            "steps_per_channel": 30,  # Steps between adjacent channels
             "current_channel": 41,  # Current channel position
             "current_position": 0,  # Current motor position
             "last_port": "",  # Last used serial port
@@ -86,7 +85,7 @@ class Configuration:
         # Arduino logic: cbChannelToPosition[channel - 1] * cbChannelSteps
         # This uses the VALUE at array index (channel-1), not the index itself
         array_value = self.channel_to_position_mapping[channel - 1]
-        steps_per_channel = self.get("steps_per_channel")
+        steps_per_channel = 30  # Fixed Arduino value (cbChannelSteps)
         
         # Add base position offset (where the motor coordinate system starts)
         base_position = self.config.get("channel_41_position", 0)
@@ -94,9 +93,7 @@ class Configuration:
     
     def calculate_channel_from_position(self, position):
         """Calculate channel number from motor position using Arduino's original logic"""
-        steps_per_channel = self.get("steps_per_channel")
-        if steps_per_channel <= 0:
-            return None
+        steps_per_channel = 30  # Fixed Arduino value (cbChannelSteps)
         
         # Remove base position offset
         base_position = self.config.get("channel_41_position", 0)
@@ -125,10 +122,20 @@ class Configuration:
         return closest_channel
     
     def get_calculated_steps_per_channel(self):
-        """Get steps per channel - using fixed value from Arduino code"""
-        # The Arduino uses a fixed 30 steps per channel (cbChannelSteps = 30)
-        # We can still allow configuration override, but default to Arduino value
-        return self.get("steps_per_channel")
+        """Get steps per channel - calculated from calibration positions for display only"""
+        ch41_pos = self.config.get("channel_41_position", 0)
+        ch40_pos = self.config.get("channel_40_position", 2400)
+        
+        # Calculate based on actual calibration positions
+        # Channel 40 has array value 40, Channel 41 has array value 1
+        # So the difference should be (40 - 1) * 30 = 39 * 30 = 1170 steps
+        expected_diff = (40 - 1) * 30  # Using Arduino's fixed 30 steps per channel
+        actual_diff = abs(ch40_pos - ch41_pos)
+        
+        if actual_diff > 0:
+            return actual_diff / (40 - 1)  # Divide by the channel value difference
+        else:
+            return 30.0  # Default Arduino value
 
 class MagnetLoopController:
     def __init__(self, root):

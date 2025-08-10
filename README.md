@@ -1,5 +1,7 @@
 # Magnet Loop Antenna Controller
 
+![images/screenshot.png](images/screenshot.png)
+
 Steuerung für Schrittmotor einer Magnet Loop Antenne für das 11m Band mit 80 Kanälen.
 
 ## Übersicht

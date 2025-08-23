@@ -254,6 +254,7 @@ void executeCommand(String command) {
     Serial.println("Motor angehalten - Warteschlange geleert");
   }
   else if (command == "P") {
+    currentChannel = calculateChannelFromPosition(currentPosition);
     // Get position
     Serial.print("Aktuelle Position: ");
     Serial.println(currentPosition);
@@ -388,6 +389,7 @@ void executeCommand(String command) {
     currentPosition = newPos;
     Serial.print("Position gesetzt auf: ");
     Serial.println(currentPosition);
+    updatePosition();
   }
   else {
     Serial.print("Unbekannter Befehl: ");

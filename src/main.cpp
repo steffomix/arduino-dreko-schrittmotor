@@ -35,7 +35,11 @@ bool stringComplete = false; // Flag for complete serial command
 bool motorIsBusy = false; // Flag to indicate if motor is currently movin
 std::queue<String> moveQueue; // Queue for move commands
 
-int cbChannelSteps = 30; // Number of steps per channel (adjust as needed)
+// Calibration variables - will be set by controller
+int cbChannelSteps = 30; // Number of steps per channel (fallback value)
+long channel41Position = 0; // Base position for channel 41 (lowest frequency)
+long channel40Position = 2400; // Position for channel 40 (highest frequency)
+bool calibrationReceived = false; // Flag to indicate if calibration was received
 
 // Channel to position mapping for 80 channels
 // This maps channels 1-80 to their respective positions
@@ -70,7 +74,9 @@ void setup() {
   Serial.print("Steps per revolution: ");
   Serial.println(4096); // Standard for 28BYJ-48 stepper
   Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status), CH<channel>");
+  Serial.println("Calibration: CAL<ch41_pos>,<ch40_pos>, SETPOS<position>");
   Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps), CH41 (go to channel 41)");
+  Serial.println("Calibration Example: CAL1000,2500 SETPOS1000");
 }
 
 
@@ -179,8 +185,35 @@ void executeCommand(String command) {
     // Direct channel command - CH<channel_number>
     int channel = command.substring(2).toInt();
     if (channel >= 1 && channel <= 80) {
-      // Calculate position for this channel using the mapping
-      int targetPosition = cbChannelToPosition[channel - 1] * cbChannelSteps;
+      // Calculate position for this channel using calibration if available
+      long targetPosition;
+      
+      if (calibrationReceived) {
+        // Use calibrated calculation
+        // Find frequency position of the channel (0-79)
+        int freqPos = -1;
+        for (int i = 0; i < 80; i++) {
+          if (cbChannelToPosition[i] == channel) {
+            freqPos = i;
+            break;
+          }
+        }
+        
+        if (freqPos >= 0) {
+          // Calculate position based on calibration
+          // Channel 41 is at frequency position 0, Channel 40 is at frequency position 79
+          float stepsPerChannel = (float)(channel40Position - channel41Position) / 79.0;
+          targetPosition = channel41Position + (long)(freqPos * stepsPerChannel);
+        } else {
+          Serial.println("Fehler: Kanal nicht in Frequenz-Mapping gefunden");
+          return;
+        }
+      } else {
+        // Use fallback calculation
+        targetPosition = cbChannelToPosition[channel - 1] * cbChannelSteps;
+        Serial.println("Warnung: Verwende Fallback-Berechnung - Kalibrierung fehlt");
+      }
+      
       int stepsToMove = targetPosition - currentPosition;
       
       if (stepsToMove != 0) {
@@ -206,6 +239,45 @@ void executeCommand(String command) {
     } else {
       Serial.println("Ungültiger Kanal (1-80)");
     }
+  }
+  else if (command.startsWith("CAL")) {
+    // Calibration command - CAL<ch41_pos>,<ch40_pos>
+    String params = command.substring(3);
+    int commaIndex = params.indexOf(',');
+    
+    if (commaIndex > 0) {
+      long ch41Pos = params.substring(0, commaIndex).toInt();
+      long ch40Pos = params.substring(commaIndex + 1).toInt();
+      
+      // Validate calibration values
+      if (ch40Pos > ch41Pos && ch41Pos >= 0 && ch40Pos <= 4075) {
+        channel41Position = ch41Pos;
+        channel40Position = ch40Pos;
+        calibrationReceived = true;
+        
+        // Calculate steps per channel
+        float stepsPerChannel = (float)(channel40Position - channel41Position) / 79.0;
+        cbChannelSteps = (int)stepsPerChannel; // Update fallback value too
+        
+        Serial.print("Kalibrierung empfangen: CH41=");
+        Serial.print(channel41Position);
+        Serial.print(", CH40=");
+        Serial.print(channel40Position);
+        Serial.print(", Schritte/Kanal=");
+        Serial.println(stepsPerChannel);
+      } else {
+        Serial.println("Ungültige Kalibrierung: CH40 muss > CH41 sein, Bereich 0-4075");
+      }
+    } else {
+      Serial.println("Kalibrierung Format: CAL<ch41_pos>,<ch40_pos>");
+    }
+  }
+  else if (command.startsWith("SETPOS")) {
+    // Set current position - SETPOS<position>
+    long newPos = command.substring(6).toInt();
+    currentPosition = newPos;
+    Serial.print("Position gesetzt auf: ");
+    Serial.println(currentPosition);
   }
   else {
     Serial.print("Unbekannter Befehl: ");

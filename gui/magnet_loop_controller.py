@@ -338,6 +338,8 @@ class MagnetLoopController:
                   command=self.save_calibration).grid(row=0, column=2, padx=(0, 5))
         ttk.Button(cal_buttons_frame, text="Position synchronisieren", 
                   command=self.sync_position).grid(row=0, column=3, padx=(0, 5))
+        ttk.Button(cal_buttons_frame, text="Kalibrierung an Arduino senden", 
+                  command=self.send_calibration_to_arduino).grid(row=0, column=4, padx=(0, 5))
         
         # Calibration status
         cal_status_frame = ttk.Frame(cal_frame)
@@ -652,10 +654,19 @@ class MagnetLoopController:
             messagebox.showwarning("Warnung", "Nicht mit Arduino verbunden!")
             return
         
-        self.send_command("P")
-        self.position_synced = True
-        self.update_sync_status()
-        self.log("Position mit Arduino synchronisiert")
+        # First send current position to Arduino
+        current_pos = self.config.get("current_position", 0)
+        pos_command = f"SETPOS{current_pos}"
+        if self.send_command(pos_command):
+            self.log(f"Position an Arduino gesendet: {current_pos}")
+            
+            # Then request position from Arduino to verify
+            self.send_command("P")
+            self.position_synced = True
+            self.update_sync_status()
+            self.log("Position mit Arduino synchronisiert")
+        else:
+            self.log("Fehler beim Synchronisieren der Position")
     
     def refresh_ports(self):
         """Refresh available serial ports"""
@@ -702,6 +713,9 @@ class MagnetLoopController:
             
             self.log(f"Verbunden mit {port_name}")
             
+            # Send calibration and position to Arduino after successful connection
+            self.root.after(3000, self.send_calibration_to_arduino)  # Wait 3 seconds for Arduino to be ready
+            
         except Exception as e:
             messagebox.showerror("Verbindungsfehler", f"Fehler beim Verbinden: {str(e)}")
             self.log(f"Verbindungsfehler: {str(e)}")
@@ -717,6 +731,37 @@ class MagnetLoopController:
         self.connect_button.config(text="Verbinden")
         self.status_label.config(text="Nicht verbunden", foreground="red")
         self.log("Verbindung getrennt")
+    
+    def send_calibration_to_arduino(self):
+        """Send calibration data to Arduino after connection"""
+        if not self.is_connected:
+            return
+            
+        # Check if we have valid calibration
+        valid, msg = self.config.is_calibration_valid()
+        if not valid:
+            self.log(f"Kalibrierung nicht gesendet: {msg}")
+            return
+        
+        ch41_pos = self.config.get("channel_41_position", 0)
+        ch40_pos = self.config.get("channel_40_position", 2400)
+        current_pos = self.config.get("current_position", 0)
+        
+        # Send calibration to Arduino
+        cal_command = f"CAL{ch41_pos},{ch40_pos}"
+        if self.send_command(cal_command):
+            self.log(f"Kalibrierung an Arduino gesendet: CH41={ch41_pos}, CH40={ch40_pos}")
+            
+            # Set current position on Arduino
+            pos_command = f"SETPOS{current_pos}"
+            if self.send_command(pos_command):
+                self.log(f"Position an Arduino gesendet: {current_pos}")
+                self.position_synced = True
+                self.update_sync_status()
+            else:
+                self.log("Fehler beim Senden der Position an Arduino")
+        else:
+            self.log("Fehler beim Senden der Kalibrierung an Arduino")
     
     def read_serial(self):
         """Read data from serial port in separate thread"""
@@ -827,6 +872,27 @@ class MagnetLoopController:
                 elif "Beschäftigt" in response:
                     self.motor_is_moving = True
                     self.update_motor_status_display()
+            
+            elif "Kalibrierung empfangen:" in response:
+                self.log("✓ Arduino hat Kalibrierung empfangen")
+                
+            elif "Position gesetzt auf:" in response:
+                # Extract position from response
+                try:
+                    parts = response.split(":")
+                    if len(parts) >= 2:
+                        position = int(parts[1].strip())
+                        self.config.set("current_position", position)
+                        self.log(f"✓ Arduino Position gesetzt: {position}")
+                except ValueError:
+                    pass
+                    
+            elif "Warnung: Verwende Fallback-Berechnung" in response:
+                self.log("⚠ " + response)
+                messagebox.showwarning("Arduino Warnung", 
+                    "Arduino verwendet Fallback-Berechnung!\n"
+                    "Kalibrierung wurde nicht korrekt übertragen.\n"
+                    "Bitte Verbindung neu aufbauen.")
                     
         except Exception as e:
             self.log(f"Fehler beim Verarbeiten der Arduino-Antwort: {e}")

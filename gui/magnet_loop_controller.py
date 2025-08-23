@@ -489,7 +489,7 @@ class MagnetLoopController:
                 self.calibration_status_label.config(text=f"⚠ {msg}", foreground="red")
     
     def change_channel(self, delta):
-        """Change channel by delta amount"""
+        """Change channel by delta amount with wrap-around (cyclic)"""
         if not self.is_connected:
             messagebox.showwarning("Warnung", "Nicht mit Arduino verbunden!")
             return
@@ -507,10 +507,12 @@ class MagnetLoopController:
         current_channel = self.config.get("current_channel", 41)
         new_channel = current_channel + delta
         
-        # Validate channel range
-        if new_channel < 1 or new_channel > 80:
-            messagebox.showerror("Fehler", f"Kanal {new_channel} ist außerhalb des gültigen Bereichs (1-80)!")
-            return
+        # Implement wrap-around (cyclic) channel navigation
+        # Channels are 1-80, so we need to handle overflow/underflow
+        while new_channel > 80:
+            new_channel -= 80
+        while new_channel < 1:
+            new_channel += 80
         
         # Send channel command to Arduino (let Arduino handle the calculations)
         self.send_command(f"CH{new_channel}")
@@ -523,7 +525,7 @@ class MagnetLoopController:
         self.motor_is_moving = True
         self.update_motor_status_display()
         
-        self.log(f"Befehl gesendet: Fahre zu Kanal {new_channel}")
+        self.log(f"Befehl gesendet: Fahre zu Kanal {new_channel} (von Kanal {current_channel} mit Delta {delta})")
     
     def goto_channel(self):
         """Go directly to specified channel"""

@@ -326,7 +326,7 @@ class MagnetLoopController:
         steps_entry = ttk.Entry(pos_frame, textvariable=self.steps_per_channel_var, width=8, state="readonly")
         steps_entry.grid(row=0, column=5, padx=(0, 10))
         
-        # Calibration buttons
+        # Calibration buttons - nur die beiden "Aktuelle Position als..." Buttons
         cal_buttons_frame = ttk.Frame(cal_frame)
         cal_buttons_frame.grid(row=1, column=0, columnspan=3, pady=(5, 0))
         
@@ -334,12 +334,6 @@ class MagnetLoopController:
                   command=self.set_channel_41_position).grid(row=0, column=0, padx=(0, 5))
         ttk.Button(cal_buttons_frame, text="Aktuelle Position als Kanal 40 setzen", 
                   command=self.set_channel_40_position).grid(row=0, column=1, padx=(0, 5))
-        ttk.Button(cal_buttons_frame, text="Kalibrierung speichern", 
-                  command=self.save_calibration).grid(row=0, column=2, padx=(0, 5))
-        ttk.Button(cal_buttons_frame, text="Position synchronisieren", 
-                  command=self.sync_position).grid(row=0, column=3, padx=(0, 5))
-        ttk.Button(cal_buttons_frame, text="Kalibrierung an Arduino senden", 
-                  command=self.send_calibration_to_arduino).grid(row=0, column=4, padx=(0, 5))
         
         # Calibration status
         cal_status_frame = ttk.Frame(cal_frame)
@@ -347,6 +341,17 @@ class MagnetLoopController:
         
         self.calibration_status_label = ttk.Label(cal_status_frame, text="Kalibrierung prüfen...", foreground="orange")
         self.calibration_status_label.grid(row=0, column=0)
+        
+        # Weitere Kalibrierung-Buttons unter dem Status
+        cal_buttons2_frame = ttk.Frame(cal_frame)
+        cal_buttons2_frame.grid(row=3, column=0, columnspan=3, pady=(5, 0))
+        
+        ttk.Button(cal_buttons2_frame, text="Kalibrierung speichern", 
+                  command=self.save_calibration).grid(row=0, column=0, padx=(0, 5))
+        ttk.Button(cal_buttons2_frame, text="Position synchronisieren", 
+                  command=self.sync_position).grid(row=0, column=1, padx=(0, 5))
+        ttk.Button(cal_buttons2_frame, text="Kalibrierung an Arduino senden", 
+                  command=self.send_calibration_to_arduino).grid(row=0, column=2, padx=(0, 5))
         
         # Control Frame
         control_frame = ttk.LabelFrame(main_frame, text="Manuelle Stepper Kontrolle", padding="5")
@@ -403,20 +408,22 @@ class MagnetLoopController:
         rpm_entry.grid(row=0, column=1, padx=(0, 5))
         ttk.Button(rpm_frame, text="Setzen", command=self.set_rpm).grid(row=0, column=2)
         
-        # Status and Log Frame
+        # Status and Log Frame - rechts neben den anderen Elementen
         log_frame = ttk.LabelFrame(main_frame, text="Status & Log", padding="5")
-        log_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
+        log_frame.grid(row=1, column=2, rowspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10), padx=(10, 0))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         
         # Log text widget
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=12, width=80)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=25, width=60)
         self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Clear log button
         ttk.Button(log_frame, text="Log löschen", command=self.clear_log).grid(row=1, column=0, pady=(5, 0))
         
-        main_frame.rowconfigure(4, weight=1)
+        # Configure grid weights für besseres Layout
+        main_frame.columnconfigure(2, weight=1)
+        main_frame.rowconfigure(1, weight=1)
     
     def load_settings(self):
         """Load settings from configuration"""

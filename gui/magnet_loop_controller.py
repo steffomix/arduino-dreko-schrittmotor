@@ -89,7 +89,12 @@ class Configuration:
         
         # Add base position offset (where the motor coordinate system starts)
         base_position = self.config.get("channel_41_position", 0)
-        return base_position + (array_value * steps_per_channel)
+        
+        # Calculate relative position from channel 41 (which has array_value = 1)
+        channel_41_array_value = 1  # Channel 41 has array value 1 in the mapping
+        relative_array_value = array_value - channel_41_array_value
+        
+        return base_position + (relative_array_value * steps_per_channel)
     
     def calculate_channel_from_position(self, position):
         """Calculate channel number from motor position using Arduino's original logic"""
@@ -99,9 +104,10 @@ class Configuration:
         base_position = self.config.get("channel_41_position", 0)
         relative_position = position - base_position
         
-        # Reverse the Arduino calculation: relative_position = array_value * steps_per_channel
-        # So array_value = relative_position / steps_per_channel
-        array_value = round(relative_position / steps_per_channel)
+        # Calculate relative array value from channel 41 (which has array_value = 1)
+        channel_41_array_value = 1
+        relative_array_value = round(relative_position / steps_per_channel)
+        array_value = channel_41_array_value + relative_array_value
         
         # Find which channel has this array value
         # Look for array_value in the mapping array and return the corresponding channel
@@ -110,11 +116,12 @@ class Configuration:
                 return channel
         
         # If exact match not found, find the closest
-        closest_channel = 1
-        min_diff = abs(self.channel_to_position_mapping[0] - array_value)
+        closest_channel = 41  # Default to channel 41
+        min_diff = float('inf')
         
         for channel in range(1, 81):
-            diff = abs(self.channel_to_position_mapping[channel - 1] - array_value)
+            channel_array_value = self.channel_to_position_mapping[channel - 1]
+            diff = abs(channel_array_value - array_value)
             if diff < min_diff:
                 min_diff = diff
                 closest_channel = channel
@@ -127,13 +134,16 @@ class Configuration:
         ch40_pos = self.config.get("channel_40_position", 2400)
         
         # Calculate based on actual calibration positions
-        # Channel 40 has array value 40, Channel 41 has array value 1
-        # So the difference should be (40 - 1) * 30 = 39 * 30 = 1170 steps
-        expected_diff = (40 - 1) * 30  # Using Arduino's fixed 30 steps per channel
-        actual_diff = abs(ch40_pos - ch41_pos)
+        # Channel 40 has array value 80, Channel 41 has array value 1
+        # So the difference should be (80 - 1) = 79 array values
+        # Each array value corresponds to 30 steps in Arduino
+        ch40_array_value = 80  # Channel 40 has array value 80
+        ch41_array_value = 1   # Channel 41 has array value 1
+        array_value_diff = abs(ch40_array_value - ch41_array_value)
+        actual_position_diff = abs(ch40_pos - ch41_pos)
         
-        if actual_diff > 0:
-            return actual_diff / (40 - 1)  # Divide by the channel value difference
+        if actual_position_diff > 0:
+            return actual_position_diff / array_value_diff
         else:
             return 30.0  # Default Arduino value
 

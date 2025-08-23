@@ -1,8 +1,8 @@
 {
   "channel_41_position": 1000,
   "channel_40_position": 3000,
-  "current_channel": 40,
-  "current_position": 5076,
+  "current_channel": 10,
+  "current_position": 2240,
   "last_port": "/dev/ttyACM0",
-  "last_rpm": 10
+  "last_rpm": 15
 }

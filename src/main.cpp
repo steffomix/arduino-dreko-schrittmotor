@@ -418,10 +418,14 @@ void clearQueue() {
 // Movement functions
 void moveForward(int steps) {
   stepper.newMove(true, steps); // true = clockwise
+  // Update position immediately when movement starts
+  currentPosition += steps;
 }
 
 void moveBackward(int steps) {
   stepper.newMove(false, steps); // false = counter-clockwise
+  // Update position immediately when movement starts
+  currentPosition -= steps;
 }
 
 void stopMovement() {
@@ -430,15 +434,10 @@ void stopMovement() {
 
 // Update position tracking
 void updatePosition() {
-  static long lastStep = 0;
   static int lastChannel = 1;
-  long currentStep = stepper.getStep();
   
-  if (currentStep != lastStep) {
-    currentPosition += (currentStep - lastStep);
-    lastStep = currentStep;
-    
-    // Update current channel based on position
+  // Update current channel based on position (only when motor is idle to avoid constant updates)
+  if (!motorIsBusy) {
     int newChannel = calculateChannelFromPosition(currentPosition);
     if (newChannel != lastChannel) {
       currentChannel = newChannel;

@@ -791,18 +791,34 @@ class MagnetLoopController:
                 # Extract position from response
                 parts = response.split(":")
                 if len(parts) >= 2:
-                    position = int(parts[1].strip())
-                    self.config.set("current_position", position)
+                    new_position = int(parts[1].strip())
+                    old_position = self.config.get("current_position", 0)
+                    
+                    # Check for suspicious position jumps
+                    position_diff = abs(new_position - old_position)
+                    if position_diff > 4100 and old_position != 0:  # Larger than maximum possible range
+                        self.log(f"⚠ WARNUNG: Verdächtiger Positionssprung von {old_position} zu {new_position} (Diff: {position_diff})")
+                        messagebox.showwarning("Position Anomalie", 
+                            f"Verdächtiger Positionssprung erkannt!\n"
+                            f"Alt: {old_position} → Neu: {new_position}\n"
+                            f"Differenz: {position_diff} Schritte\n\n"
+                            f"Dies könnte auf ein Arduino-Problem hindeuten.\n"
+                            f"Bitte Position manuell überprüfen!")
+                        # Mark position as not synchronized
+                        self.position_synced = False
+                        self.update_sync_status()
+                    
+                    self.config.set("current_position", new_position)
                     
                     # Update current channel based on position
-                    channel = self.config.calculate_channel_from_position(position)
+                    channel = self.config.calculate_channel_from_position(new_position)
                     if channel:
                         self.config.set("current_channel", channel)
                         self.update_channel_display()
                         # Save configuration to keep position and channel synchronized
                         self.config.save_config()
                     
-                    self.log(f"Position aktualisiert: {position} (Kanal {channel})")
+                    self.log(f"Position aktualisiert: {new_position} (Kanal {channel})")
             
             elif "Motor angehalten" in response or "STOPP" in response:
                 self.motor_is_moving = False

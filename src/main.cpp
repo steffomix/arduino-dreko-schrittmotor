@@ -3,6 +3,7 @@
 
 #include <CheapStepper.h>
 #include <stepper.h>
+#include "Arduino_LED_Matrix.h"
 
 /*
  * Magnet Loop Antenna Stepper Controller
@@ -28,12 +29,16 @@
 // Stepper motor setup - pins 8,9,10,11 to IN1,IN2,IN3,IN4 on ULN2003 board
 CheapStepper stepper(8, 9, 10, 11);
 
+// LED Matrix setup
+ArduinoLEDMatrix matrix;
+
 // Global variables
 long currentPosition = 0;  // Track absolute position
 String inputString = "";   // String to hold incoming serial data
 bool stringComplete = false; // Flag for complete serial command
 bool motorIsBusy = false; // Flag to indicate if motor is currently movin
 std::queue<String> moveQueue; // Queue for move commands
+int currentChannel = 1;   // Track current channel for LED matrix display
 
 // Calibration variables - will be set by controller
 int cbChannelSteps = 30; // Number of steps per channel (fallback value)
@@ -55,9 +60,96 @@ std::array<int, 80> cbChannelToPosition = {
   31,32,33,34,35,36,37,38,39, 40
 };
 
+// LED Matrix digit patterns (5x7 pixels for digits 0-9)
+// Each digit is represented as 5 bytes, each bit representing a pixel
+const byte digitPatterns[10][5] = {
+  // 0
+  {0b01110, 0b10001, 0b10001, 0b10001, 0b01110},
+  // 1  
+  {0b00100, 0b01100, 0b00100, 0b00100, 0b01110},
+  // 2
+  {0b01110, 0b10001, 0b00010, 0b01100, 0b11111},
+  // 3
+  {0b01110, 0b10001, 0b00110, 0b10001, 0b01110},
+  // 4
+  {0b10001, 0b10001, 0b11111, 0b00001, 0b00001},
+  // 5
+  {0b11111, 0b10000, 0b11110, 0b00001, 0b11110},
+  // 6
+  {0b01110, 0b10000, 0b11110, 0b10001, 0b01110},
+  // 7
+  {0b11111, 0b00001, 0b00010, 0b00100, 0b01000},
+  // 8
+  {0b01110, 0b10001, 0b01110, 0b10001, 0b01110},
+  // 9
+  {0b01110, 0b10001, 0b01111, 0b00001, 0b01110}
+};
+
+// Function to display a two-digit number on LED matrix
+void displayChannelOnMatrix(int channel) {
+  if (channel < 1 || channel > 80) return;
+  
+  // Clear the frame
+  byte frame[8][12] = {0};
+  
+  // Get tens and units digits
+  int tens = channel / 10;
+  int units = channel % 10;
+  
+  // Display tens digit (left side, columns 1-5)
+  if (tens > 0) { // Don't display leading zero
+    for (int row = 0; row < 5; row++) {
+      for (int col = 0; col < 5; col++) {
+        if (digitPatterns[tens][row] & (1 << (4-col))) {
+          frame[row + 1][col + 1] = 1;
+        }
+      }
+    }
+  }
+  
+  // Display units digit (right side, columns 7-11)
+  for (int row = 0; row < 5; row++) {
+    for (int col = 0; col < 5; col++) {
+      if (digitPatterns[units][row] & (1 << (4-col))) {
+        frame[row + 1][col + 7] = 1;
+      }
+    }
+  }
+  
+  // Render the frame on the matrix
+  matrix.renderBitmap(frame, 8, 12);
+}
+
+// Function to calculate current channel from position
+int calculateChannelFromPosition(long position) {
+  if (!calibrationReceived) {
+    // Use fallback calculation
+    int estimatedChannel = (position / cbChannelSteps) + 1;
+    if (estimatedChannel < 1) return 1;
+    if (estimatedChannel > 80) return 80;
+    return estimatedChannel;
+  }
+  
+  // Use calibrated calculation
+  if (position < channel41Position) return 41; // Below range
+  if (position > channel40Position) return 40; // Above range
+  
+  // Calculate frequency position (0-79)
+  float stepsPerChannel = (float)(channel40Position - channel41Position) / 79.0;
+  int freqPos = (int)((position - channel41Position) / stepsPerChannel + 0.5); // Round to nearest
+  
+  if (freqPos < 0) freqPos = 0;
+  if (freqPos > 79) freqPos = 79;
+  
+  return cbChannelToPosition[freqPos];
+}
+
 void setup() {
   // Initialize serial communication
   Serial.begin(9600);
+  
+  // Initialize LED matrix
+  matrix.begin();
   
   // Set stepper RPM (adjust as needed for your setup)
   stepper.setRpm(8);
@@ -73,10 +165,14 @@ void setup() {
   Serial.println(stepper.getRpm());
   Serial.print("Steps per revolution: ");
   Serial.println(4096); // Standard for 28BYJ-48 stepper
-  Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status), CH<channel>");
+  Serial.println("Commands: F<steps>, B<steps>, S (stop), P (position), RPM<value>, Q (queue status), CH<channel>, D (display)");
   Serial.println("Calibration: CAL<ch41_pos>,<ch40_pos>, SETPOS<position>");
-  Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps), CH41 (go to channel 41)");
+  Serial.println("Example: F100 (forward 100 steps), B50 (backward 50 steps), CH41 (go to channel 41), D (refresh display)");
   Serial.println("Calibration Example: CAL1000,2500 SETPOS1000");
+  Serial.println("LED Matrix shows current channel (01-80)");
+  
+  // Display initial channel on LED matrix
+  displayChannelOnMatrix(currentChannel);
 }
 
 
@@ -161,6 +257,10 @@ void executeCommand(String command) {
     // Get position
     Serial.print("Aktuelle Position: ");
     Serial.println(currentPosition);
+    Serial.print("Aktueller Kanal: ");
+    Serial.println(currentChannel);
+    // Update LED matrix display
+    displayChannelOnMatrix(currentChannel);
   }
   else if (command == "Q") {
     // Get queue status
@@ -169,6 +269,12 @@ void executeCommand(String command) {
     Serial.println(" Befehle wartend");
     Serial.print("Motor Status: ");
     Serial.println(motorIsBusy ? "Beschäftigt" : "Bereit");
+  }
+  else if (command == "D") {
+    // Display current channel on LED matrix
+    Serial.print("Zeige Kanal auf Matrix: ");
+    Serial.println(currentChannel);
+    displayChannelOnMatrix(currentChannel);
   }
   else if (command.startsWith("RPM")) {
     // Set RPM
@@ -215,6 +321,10 @@ void executeCommand(String command) {
       }
       
       int stepsToMove = targetPosition - currentPosition;
+      
+      // Update current channel and display on LED matrix
+      currentChannel = channel;
+      displayChannelOnMatrix(currentChannel);
       
       if (stepsToMove != 0) {
         if (stepsToMove > 0) {
@@ -319,11 +429,20 @@ void stopMovement() {
 // Update position tracking
 void updatePosition() {
   static long lastStep = 0;
+  static int lastChannel = 1;
   long currentStep = stepper.getStep();
   
   if (currentStep != lastStep) {
     currentPosition += (currentStep - lastStep);
     lastStep = currentStep;
+    
+    // Update current channel based on position
+    int newChannel = calculateChannelFromPosition(currentPosition);
+    if (newChannel != lastChannel) {
+      currentChannel = newChannel;
+      displayChannelOnMatrix(currentChannel);
+      lastChannel = newChannel;
+    }
   }
 }
 

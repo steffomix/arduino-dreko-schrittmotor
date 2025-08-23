@@ -35,18 +35,19 @@ class Configuration:
             "last_rpm": 12  # Last used RPM setting
         }
         
-        # Arduino channel to position mapping (same as in Arduino code)
-        # This maps channels 1-80 to their respective array indices
-        # Array index corresponds to the position in the mapping
-        self.channel_to_position_mapping = [
-            41, 42, 43, 44, 45, 46, 47, 48, 49, 50,  # indices 0-9: channels 41-50
-            51, 52, 53, 54, 55, 56, 57, 58, 59, 60,  # indices 10-19: channels 51-60
-            61, 62, 63, 64, 65, 66, 67, 68, 69, 70,  # indices 20-29: channels 61-70
-            71, 72, 73, 74, 75, 76, 77, 78, 79, 80,  # indices 30-39: channels 71-80
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10,          # indices 40-49: channels 1-10
-            11, 12, 13, 14, 15, 16, 17, 18, 19, 20,  # indices 50-59: channels 11-20
-            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # indices 60-69: channels 21-30
-            31, 32, 33, 34, 35, 36, 37, 38, 39, 40   # indices 70-79: channels 31-40
+        # Arduino channel to frequency position mapping (CB Funk Frequenz-Reihenfolge)
+        # Dies ist die Reihenfolge der Kanäle nach Frequenz (niedrigste zu höchste)
+        # Index = Frequenz-Position (0 = niedrigste Frequenz, 79 = höchste Frequenz)
+        # Wert = Kanal-Nummer
+        self.frequency_order_channels = [
+            41, 42, 43, 44, 45, 46, 47, 48, 49, 50,  # Frequenz-Positionen 0-9: Kanäle 41-50
+            51, 52, 53, 54, 55, 56, 57, 58, 59, 60,  # Frequenz-Positionen 10-19: Kanäle 51-60
+            61, 62, 63, 64, 65, 66, 67, 68, 69, 70,  # Frequenz-Positionen 20-29: Kanäle 61-70
+            71, 72, 73, 74, 75, 76, 77, 78, 79, 80,  # Frequenz-Positionen 30-39: Kanäle 71-80
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10,          # Frequenz-Positionen 40-49: Kanäle 1-10
+            11, 12, 13, 14, 15, 16, 17, 18, 19, 20,  # Frequenz-Positionen 50-59: Kanäle 11-20
+            21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # Frequenz-Positionen 60-69: Kanäle 21-30
+            31, 32, 33, 34, 35, 36, 37, 38, 39, 40   # Frequenz-Positionen 70-79: Kanäle 31-40
         ]
         
         self.load_config()
@@ -73,79 +74,103 @@ class Configuration:
         """Get configuration value"""
         return self.config.get(key, default)
     
-    def set(self, key, value):
-        """Set configuration value"""
-        self.config[key] = value
+    def get_channel_frequency_position(self, channel):
+        """Gibt die Frequenz-Position für einen Kanal zurück (0-79)"""
+        try:
+            return self.frequency_order_channels.index(channel)
+        except ValueError:
+            return None
+    
+    def get_channel_from_frequency_position(self, freq_pos):
+        """Gibt den Kanal für eine Frequenz-Position zurück"""
+        if 0 <= freq_pos < len(self.frequency_order_channels):
+            return self.frequency_order_channels[freq_pos]
+        return None
+    
+    def is_calibration_valid(self):
+        """Prüft ob die Kalibrierung gültig ist"""
+        ch40_pos = self.config.get("channel_40_position", -1)
+        ch41_pos = self.config.get("channel_41_position", -1)
+        
+        # Kalibrierung muss vorliegen
+        if ch40_pos < 0 or ch41_pos < 0:
+            return False, "Kalibrierung fehlt: Beide Kanäle müssen kalibriert werden"
+        
+        # Positionen müssen in gültigen Bereichen sein
+        if not (0 <= ch40_pos <= 4075) or not (0 <= ch41_pos <= 4075):
+            return False, "Kalibrierung ungültig: Positionen müssen zwischen 0 und 4075 liegen"
+        
+        # Kanal 40 muss niedriger als Kanal 41 sein (niedrigere Frequenz = niedrigere Position)
+        if ch40_pos >= ch41_pos:
+            return False, "Kalibrierung ungültig: Kanal 40 muss niedriger als Kanal 41 sein"
+        
+        return True, "Kalibrierung gültig"
+    
+    def get_steps_per_channel(self):
+        """Berechnet Schritte pro Kanal aus der Kalibrierung"""
+        valid, msg = self.is_calibration_valid()
+        if not valid:
+            return 30.0  # Fallback-Wert
+        
+        ch40_pos = self.config.get("channel_40_position", 0)
+        ch41_pos = self.config.get("channel_41_position", 0)
+        
+        # Kanal 40 ist bei Frequenz-Position 79, Kanal 41 bei Position 0
+        # Der Unterschied ist 79 Frequenz-Positionen
+        frequency_positions_diff = 79  # Von Position 0 (Kanal 41) zu Position 79 (Kanal 40)
+        motor_positions_diff = ch40_pos - ch41_pos
+        
+        return motor_positions_diff / frequency_positions_diff
     
     def calculate_channel_position(self, channel):
-        """Calculate motor position for a given channel using Arduino's original logic"""
+        """Calculate motor position for a given channel using calibration"""
         if channel < 1 or channel > 80:
             return None
         
-        # Arduino logic: cbChannelToPosition[channel - 1] * cbChannelSteps
-        # This uses the VALUE at array index (channel-1), not the index itself
-        array_value = self.channel_to_position_mapping[channel - 1]
-        steps_per_channel = 30  # Fixed Arduino value (cbChannelSteps)
+        # Prüfe Kalibrierung
+        valid, msg = self.is_calibration_valid()
+        if not valid:
+            return None
         
-        # Add base position offset (where the motor coordinate system starts)
-        base_position = self.config.get("channel_41_position", 0)
+        # Finde Frequenz-Position des Kanals
+        freq_pos = self.get_channel_frequency_position(channel)
+        if freq_pos is None:
+            return None
         
-        # Calculate relative position from channel 41 (which has array_value = 1)
-        channel_41_array_value = 1  # Channel 41 has array value 1 in the mapping
-        relative_array_value = array_value - channel_41_array_value
+        # Berechne Position basierend auf Kalibrierung
+        ch41_pos = self.config.get("channel_41_position", 0)  # Frequenz-Position 0
+        steps_per_channel = self.get_steps_per_channel()
         
-        return base_position + (relative_array_value * steps_per_channel)
+        # Motorposition = Basis-Position + (Frequenz-Position * Schritte pro Kanal)
+        return ch41_pos + (freq_pos * steps_per_channel)
     
     def calculate_channel_from_position(self, position):
-        """Calculate channel number from motor position using Arduino's original logic"""
-        steps_per_channel = 30  # Fixed Arduino value (cbChannelSteps)
+        """Calculate channel number from motor position using calibration"""
+        # Prüfe Kalibrierung
+        valid, msg = self.is_calibration_valid()
+        if not valid:
+            return 41  # Fallback zu Kanal 41
         
-        # Remove base position offset
-        base_position = self.config.get("channel_41_position", 0)
-        relative_position = position - base_position
+        # Berechne Frequenz-Position aus Motor-Position
+        ch41_pos = self.config.get("channel_41_position", 0)  # Frequenz-Position 0
+        steps_per_channel = self.get_steps_per_channel()
         
-        # Calculate relative array value from channel 41 (which has array_value = 1)
-        channel_41_array_value = 1
-        relative_array_value = round(relative_position / steps_per_channel)
-        array_value = channel_41_array_value + relative_array_value
+        if steps_per_channel <= 0:
+            return 41  # Fallback
         
-        # Find which channel has this array value
-        # Look for array_value in the mapping array and return the corresponding channel
-        for channel in range(1, 81):  # channels 1-80
-            if self.channel_to_position_mapping[channel - 1] == array_value:
-                return channel
+        # Frequenz-Position = (Motor-Position - Basis-Position) / Schritte pro Kanal
+        relative_position = position - ch41_pos
+        freq_pos = round(relative_position / steps_per_channel)
         
-        # If exact match not found, find the closest
-        closest_channel = 41  # Default to channel 41
-        min_diff = float('inf')
+        # Begrenze auf gültigen Bereich
+        freq_pos = max(0, min(79, freq_pos))
         
-        for channel in range(1, 81):
-            channel_array_value = self.channel_to_position_mapping[channel - 1]
-            diff = abs(channel_array_value - array_value)
-            if diff < min_diff:
-                min_diff = diff
-                closest_channel = channel
-        
-        return closest_channel
+        # Finde Kanal für diese Frequenz-Position
+        return self.get_channel_from_frequency_position(freq_pos)
     
     def get_calculated_steps_per_channel(self):
         """Get steps per channel - calculated from calibration positions for display only"""
-        ch41_pos = self.config.get("channel_41_position", 0)
-        ch40_pos = self.config.get("channel_40_position", 2400)
-        
-        # Calculate based on actual calibration positions
-        # Channel 40 has array value 80, Channel 41 has array value 1
-        # So the difference should be (80 - 1) = 79 array values
-        # Each array value corresponds to 30 steps in Arduino
-        ch40_array_value = 80  # Channel 40 has array value 80
-        ch41_array_value = 1   # Channel 41 has array value 1
-        array_value_diff = abs(ch40_array_value - ch41_array_value)
-        actual_position_diff = abs(ch40_pos - ch41_pos)
-        
-        if actual_position_diff > 0:
-            return actual_position_diff / array_value_diff
-        else:
-            return 30.0  # Default Arduino value
+        return self.get_steps_per_channel()
 
 class MagnetLoopController:
     def __init__(self, root):
@@ -309,6 +334,13 @@ class MagnetLoopController:
         ttk.Button(cal_buttons_frame, text="Position synchronisieren", 
                   command=self.sync_position).grid(row=0, column=3, padx=(0, 5))
         
+        # Calibration status
+        cal_status_frame = ttk.Frame(cal_frame)
+        cal_status_frame.grid(row=2, column=0, columnspan=3, pady=(5, 0))
+        
+        self.calibration_status_label = ttk.Label(cal_status_frame, text="Kalibrierung prüfen...", foreground="orange")
+        self.calibration_status_label.grid(row=0, column=0)
+        
         # Control Frame
         control_frame = ttk.LabelFrame(main_frame, text="Manuelle Stepper Kontrolle", padding="5")
         control_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
@@ -398,6 +430,9 @@ class MagnetLoopController:
         # Set sync status
         self.update_sync_status()
         
+        # Check calibration status
+        self.update_calibration_status()
+        
         # Try to select last used port
         last_port = self.config.get("last_port", "")
         if last_port:
@@ -430,6 +465,15 @@ class MagnetLoopController:
             self.motor_status_var.set("⚫ Motor bereit")
             self.motor_status_label.config(foreground="green")
     
+    def update_calibration_status(self):
+        """Update calibration status display"""
+        valid, msg = self.config.is_calibration_valid()
+        if hasattr(self, 'calibration_status_label'):
+            if valid:
+                self.calibration_status_label.config(text=f"✓ {msg}", foreground="green")
+            else:
+                self.calibration_status_label.config(text=f"⚠ {msg}", foreground="red")
+    
     def change_channel(self, delta):
         """Change channel by delta amount"""
         if not self.is_connected:
@@ -438,6 +482,12 @@ class MagnetLoopController:
         
         if self.motor_is_moving:
             messagebox.showwarning("Warnung", "Motor bewegt sich gerade. Bitte warten!")
+            return
+        
+        # Prüfe Kalibrierung
+        valid, msg = self.config.is_calibration_valid()
+        if not valid:
+            messagebox.showerror("Kalibrierung ungültig", f"Kanalnavigation nicht möglich:\n{msg}")
             return
         
         current_channel = self.config.get("current_channel", 41)
@@ -476,6 +526,12 @@ class MagnetLoopController:
             
             if self.motor_is_moving:
                 messagebox.showwarning("Warnung", "Motor bewegt sich gerade. Bitte warten!")
+                return
+            
+            # Prüfe Kalibrierung
+            valid, msg = self.config.is_calibration_valid()
+            if not valid:
+                messagebox.showerror("Kalibrierung ungültig", f"Kanalnavigation nicht möglich:\n{msg}")
                 return
             
             # Send channel command directly to Arduino
@@ -542,10 +598,31 @@ class MagnetLoopController:
             ch41_pos = int(self.ch41_pos_var.get())
             ch40_pos = int(self.ch40_pos_var.get())
             
-            # Validate that positions are different
-            if ch40_pos == ch41_pos:
-                messagebox.showerror("Fehler", "Kanal 40 und Kanal 41 Positionen müssen unterschiedlich sein!")
+            # Validate positions are in range
+            if not (0 <= ch41_pos <= 4075) or not (0 <= ch40_pos <= 4075):
+                messagebox.showerror("Fehler", "Positionen müssen zwischen 0 und 4075 liegen!")
                 return
+            
+            # Validate that CH40 < CH41 (CH40 ist niedrigere Frequenz, also niedrigere Position)
+            if ch40_pos >= ch41_pos:
+                messagebox.showerror("Fehler", 
+                    "Kanal 40 muss eine niedrigere Position als Kanal 41 haben!\n"
+                    "Kanal 40 = niedrigste Frequenz (Position sollte kleiner sein)\n"
+                    "Kanal 41 = höhere Frequenz (Position sollte größer sein)")
+                return
+            
+            # Calculate steps per channel for display
+            steps_diff = ch41_pos - ch40_pos
+            frequency_positions_diff = 79  # From freq pos 0 (CH41) to freq pos 79 (CH40)
+            steps_per_channel = steps_diff / frequency_positions_diff
+            
+            # Warn if steps per channel seems unusual
+            if steps_per_channel < 10 or steps_per_channel > 100:
+                result = messagebox.askyesno("Warnung", 
+                    f"Schritte pro Kanal: {steps_per_channel:.2f}\n"
+                    "Dieser Wert scheint ungewöhnlich. Möchten Sie trotzdem speichern?")
+                if not result:
+                    return
             
             self.config.set("channel_41_position", ch41_pos)
             self.config.set("channel_40_position", ch40_pos)
@@ -554,6 +631,9 @@ class MagnetLoopController:
             # Update the calculated steps per channel display
             calculated_steps = self.config.get_calculated_steps_per_channel()
             self.steps_per_channel_var.set(f"{calculated_steps:.2f}")
+            
+            # Update calibration status
+            self.update_calibration_status()
             
             messagebox.showinfo("Info", "Kalibrierung gespeichert!")
             self.log(f"Kalibrierung gespeichert: CH41={ch41_pos}, CH40={ch40_pos}, Schritte/Kanal={calculated_steps:.2f}")
@@ -722,6 +802,9 @@ class MagnetLoopController:
                 self.log("➡ " + response)
             
             elif "Bereits auf Kanal" in response:
+                # Motor is not moving when already on target channel
+                self.motor_is_moving = False
+                self.update_motor_status_display()
                 # Extract channel number
                 try:
                     parts = response.split()

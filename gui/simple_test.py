@@ -1,59 +1,88 @@
 #!/usr/bin/env python3
 """
-Simple test for channel mapping
+Test für korrigierte Channel-Mapping Logik
 """
 
-# Test the mapping manually
-channel_to_position_mapping = [
-    41, 42, 43, 44, 45, 46, 47, 48, 49, 50,  # indices 0-9: channels 1-10 -> array values 41-50
-    51, 52, 53, 54, 55, 56, 57, 58, 59, 60,  # indices 10-19: channels 11-20 -> array values 51-60
-    61, 62, 63, 64, 65, 66, 67, 68, 69, 70,  # indices 20-29: channels 21-30 -> array values 61-70
-    71, 72, 73, 74, 75, 76, 77, 78, 79, 80,  # indices 30-39: channels 31-40 -> array values 71-80
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,          # indices 40-49: channels 41-50 -> array values 1-10
-    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,  # indices 50-59: channels 51-60 -> array values 11-20
-    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # indices 60-69: channels 61-70 -> array values 21-30
-    31, 32, 33, 34, 35, 36, 37, 38, 39, 40   # indices 70-79: channels 71-80 -> array values 31-40
+# CB Funk Frequenz-Reihenfolge (von niedrigster zu höchster Frequenz)
+frequency_order_channels = [
+    41, 42, 43, 44, 45, 46, 47, 48, 49, 50,  # Frequenz-Positionen 0-9
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60,  # Frequenz-Positionen 10-19
+    61, 62, 63, 64, 65, 66, 67, 68, 69, 70,  # Frequenz-Positionen 20-29
+    71, 72, 73, 74, 75, 76, 77, 78, 79, 80,  # Frequenz-Positionen 30-39
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,          # Frequenz-Positionen 40-49
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,  # Frequenz-Positionen 50-59
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30,  # Frequenz-Positionen 60-69
+    31, 32, 33, 34, 35, 36, 37, 38, 39, 40   # Frequenz-Positionen 70-79
 ]
 
-def calculate_channel_position(channel, base_pos=1000):
-    """Calculate position for a channel"""
-    array_value = channel_to_position_mapping[channel - 1]
-    channel_41_array_value = 1
-    relative_array_value = array_value - channel_41_array_value
-    return base_pos + (relative_array_value * 30)
+def get_frequency_position(channel):
+    """Frequenz-Position für einen Kanal"""
+    try:
+        return frequency_order_channels.index(channel)
+    except ValueError:
+        return None
 
-def calculate_channel_from_position(position, base_pos=1000):
-    """Calculate channel from position"""
-    relative_position = position - base_pos
-    channel_41_array_value = 1
-    relative_array_value = round(relative_position / 30)
-    array_value = channel_41_array_value + relative_array_value
+def get_channel_from_frequency_position(freq_pos):
+    """Kanal für eine Frequenz-Position"""
+    if 0 <= freq_pos < len(frequency_order_channels):
+        return frequency_order_channels[freq_pos]
+    return None
+
+def calculate_channel_position(channel, ch41_pos, ch40_pos):
+    """Berechne Motor-Position für einen Kanal"""
+    freq_pos = get_frequency_position(channel)
+    if freq_pos is None:
+        return None
     
-    # Find channel with this array value
-    for channel in range(1, 81):
-        if channel_to_position_mapping[channel - 1] == array_value:
-            return channel
-    return 41  # default
+    # Schritte pro Kanal aus Kalibrierung
+    steps_per_channel = (ch40_pos - ch41_pos) / 79  # 79 Frequenz-Positionen zwischen CH41 und CH40
+    
+    return ch41_pos + (freq_pos * steps_per_channel)
 
-print("=== Channel Mapping Analysis ===")
-print("Channel 41 array value:", channel_to_position_mapping[40])  # Index 40 = Channel 41
-print("Channel 40 array value:", channel_to_position_mapping[39])  # Index 39 = Channel 40
-print("Channel 42 array value:", channel_to_position_mapping[41])  # Index 41 = Channel 42
+def calculate_channel_from_position(position, ch41_pos, ch40_pos):
+    """Berechne Kanal aus Motor-Position"""
+    steps_per_channel = (ch40_pos - ch41_pos) / 79
+    relative_position = position - ch41_pos
+    freq_pos = round(relative_position / steps_per_channel)
+    freq_pos = max(0, min(79, freq_pos))  # Begrenzen
+    return get_channel_from_frequency_position(freq_pos)
+
+# Test mit korrigierter Kalibrierung: CH41=1000, CH40=3000
+print("=== Korrigierte Kalibrierung Test ===")
+ch41_pos = 1000  # Kanal 41 bei Position 1000
+ch40_pos = 3000  # Kanal 40 bei Position 3000
+steps_per_channel = (ch40_pos - ch41_pos) / 79
+
+print(f"Kanal 41 Position: {ch41_pos}")
+print(f"Kanal 40 Position: {ch40_pos}")
+print(f"Schritte pro Kanal: {steps_per_channel:.2f}")
 print()
 
-# Test with base position 1000
-base = 1000
-print("=== Test with base position 1000 ===")
-print(f"Channel 41 -> Position: {calculate_channel_position(41, base)}")
-print(f"Channel 40 -> Position: {calculate_channel_position(40, base)}")
-print(f"Channel 42 -> Position: {calculate_channel_position(42, base)}")
+print("=== Frequenz-Positionen ===")
+print(f"Kanal 41 -> Frequenz-Position: {get_frequency_position(41)}")
+print(f"Kanal 40 -> Frequenz-Position: {get_frequency_position(40)}")
+print(f"Kanal 42 -> Frequenz-Position: {get_frequency_position(42)}")
+print(f"Kanal  1 -> Frequenz-Position: {get_frequency_position(1)}")
 print()
 
-# Test reverse calculation
-test_positions = [1000, 2000, 1140, 120, 60, 360, 330]
-print("=== Reverse calculation ===")
-for pos in test_positions:
-    channel = calculate_channel_from_position(pos, base)
-    calc_back = calculate_channel_position(channel, base)
-    array_val = channel_to_position_mapping[channel - 1]
-    print(f"Position {pos:4d} -> Channel {channel:2d} (Array: {array_val:2d}, Back: {calc_back:4d})")
+print("=== Channel -> Position ===")
+test_channels = [40, 41, 42, 1, 2, 50, 80]
+for channel in test_channels:
+    pos = calculate_channel_position(channel, ch41_pos, ch40_pos)
+    freq_pos = get_frequency_position(channel)
+    print(f"Kanal {channel:2d} -> Position {pos:7.1f} (Freq-Pos: {freq_pos:2d})")
+
+print()
+print("=== Position -> Channel (aus Log-Daten) ===")
+log_positions = [1000, 2000, 3000, 2070, 1140, 210, 2400]
+for position in log_positions:
+    channel = calculate_channel_from_position(position, ch41_pos, ch40_pos)
+    calc_back = calculate_channel_position(channel, ch41_pos, ch40_pos)
+    freq_pos = get_frequency_position(channel)
+    print(f"Position {position:4d} -> Kanal {channel:2d} (Freq-Pos: {freq_pos:2d}, Zurück: {calc_back:7.1f})")
+
+print()
+print("=== Erwartete Ergebnisse für korrekte Kalibrierung ===")
+print("Position 1000 -> Kanal 41 (Basis-Kalibrierung)")
+print("Position 3000 -> Kanal 40 (Kalibrierungs-Ziel)")
+print("Alle anderen Positionen sollten logische Kanäle ergeben")

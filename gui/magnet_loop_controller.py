@@ -74,6 +74,10 @@ class Configuration:
         """Get configuration value"""
         return self.config.get(key, default)
     
+    def set(self, key, value):
+        """Set configuration value"""
+        self.config[key] = value
+    
     def get_channel_frequency_position(self, channel):
         """Gibt die Frequenz-Position für einen Kanal zurück (0-79)"""
         try:
@@ -100,9 +104,9 @@ class Configuration:
         if not (0 <= ch40_pos <= 4075) or not (0 <= ch41_pos <= 4075):
             return False, "Kalibrierung ungültig: Positionen müssen zwischen 0 und 4075 liegen"
         
-        # Kanal 40 muss niedriger als Kanal 41 sein (niedrigere Frequenz = niedrigere Position)
-        if ch40_pos >= ch41_pos:
-            return False, "Kalibrierung ungültig: Kanal 40 muss niedriger als Kanal 41 sein"
+        # Kanal 40 muss höher als Kanal 41 sein (niedrigere Frequenz = niedrigere Position)
+        if ch40_pos < ch41_pos:
+            return False, "Kalibrierung ungültig: Kanal 40 muss höher als Kanal 41 sein"
         
         return True, "Kalibrierung gültig"
     
@@ -604,7 +608,7 @@ class MagnetLoopController:
                 return
             
             # Validate that CH40 < CH41 (CH40 ist niedrigere Frequenz, also niedrigere Position)
-            if ch40_pos >= ch41_pos:
+            if ch40_pos <= ch41_pos:
                 messagebox.showerror("Fehler", 
                     "Kanal 40 muss eine niedrigere Position als Kanal 41 haben!\n"
                     "Kanal 40 = niedrigste Frequenz (Position sollte kleiner sein)\n"

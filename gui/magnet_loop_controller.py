@@ -104,9 +104,9 @@ class Configuration:
         if not (0 <= ch40_pos <= 4075) or not (0 <= ch41_pos <= 4075):
             return False, "Kalibrierung ungültig: Positionen müssen zwischen 0 und 4075 liegen"
         
-        # Kanal 40 muss höher als Kanal 41 sein (niedrigere Frequenz = niedrigere Position)
-        if ch40_pos < ch41_pos:
-            return False, "Kalibrierung ungültig: Kanal 40 muss höher als Kanal 41 sein"
+        # Kanal 40 muss höher als Kanal 41 sein (höchste Frequenz = höchste Position)
+        if ch40_pos <= ch41_pos:
+            return False, "Kalibrierung ungültig: Kanal 40 (höchste Freq.) muss höhere Position als Kanal 41 (niedrigste Freq.) haben"
         
         return True, "Kalibrierung gültig"
     
@@ -119,10 +119,11 @@ class Configuration:
         ch40_pos = self.config.get("channel_40_position", 0)
         ch41_pos = self.config.get("channel_41_position", 0)
         
-        # Kanal 40 ist bei Frequenz-Position 79, Kanal 41 bei Position 0
+        # Kanal 41 ist bei Frequenz-Position 0 (niedrigste Frequenz, niedrigste Position)
+        # Kanal 40 ist bei Frequenz-Position 79 (höchste Frequenz, höchste Position)
         # Der Unterschied ist 79 Frequenz-Positionen
         frequency_positions_diff = 79  # Von Position 0 (Kanal 41) zu Position 79 (Kanal 40)
-        motor_positions_diff = ch40_pos - ch41_pos
+        motor_positions_diff = ch40_pos - ch41_pos  # CH40 ist höher als CH41
         
         return motor_positions_diff / frequency_positions_diff
     
@@ -607,16 +608,16 @@ class MagnetLoopController:
                 messagebox.showerror("Fehler", "Positionen müssen zwischen 0 und 4075 liegen!")
                 return
             
-            # Validate that CH40 < CH41 (CH40 ist niedrigere Frequenz, also niedrigere Position)
+            # Validate that CH40 > CH41 (CH40 ist höchste Frequenz, also höchste Position)
             if ch40_pos <= ch41_pos:
                 messagebox.showerror("Fehler", 
-                    "Kanal 40 muss eine niedrigere Position als Kanal 41 haben!\n"
-                    "Kanal 40 = niedrigste Frequenz (Position sollte kleiner sein)\n"
-                    "Kanal 41 = höhere Frequenz (Position sollte größer sein)")
+                    "Kanal 40 muss eine höhere Position als Kanal 41 haben!\n"
+                    "Kanal 40 = höchste Frequenz (27.405 MHz) → Position sollte größer sein\n"
+                    "Kanal 41 = niedrigste Frequenz (26.565 MHz) → Position sollte kleiner sein")
                 return
             
             # Calculate steps per channel for display
-            steps_diff = ch41_pos - ch40_pos
+            steps_diff = ch40_pos - ch41_pos  # CH40 höher als CH41
             frequency_positions_diff = 79  # From freq pos 0 (CH41) to freq pos 79 (CH40)
             steps_per_channel = steps_diff / frequency_positions_diff
             
